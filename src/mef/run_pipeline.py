@@ -30,6 +30,7 @@ from mef.config import load_app_config
 from mef.db.connection import connect_mefdb
 from mef.email_render import render_daily_email
 from mef.evidence import EvidenceBundle, pull_latest_evidence
+from mef.lifecycle import sweep as lifecycle_sweep
 from mef.llm.gate import GateResult, apply_gate
 from mef.ranker import RankedCandidate, rank, select_for_emission
 from mef.uid import next_uid
@@ -311,6 +312,11 @@ def execute(when_kind: str) -> dict[str, Any]:
     try:
         run_uid, started_at = _open_daily_run(conn, when_kind)
         try:
+            # Lifecycle sweep before generating new ideas — catches any
+            # proposed rec whose entry window has closed, and any active
+            # rec whose symbol disappeared from the latest import.
+            life = lifecycle_sweep()
+
             counts = _universe_counts(conn)
             universe_total = counts["stocks"] + counts["etfs"]
 
@@ -357,7 +363,8 @@ def execute(when_kind: str) -> dict[str, Any]:
                     f"threshold={conviction_threshold} cap={max_new_ideas} "
                     f"gate_available={gate.available} "
                     f"approved={len(gate.approved)} rejected={len(gate.rejected)} "
-                    f"unavailable={len(gate.unavailable)}"
+                    f"unavailable={len(gate.unavailable)} "
+                    f"expired={len(life.expired)} closed={len(life.closed)}"
                 ),
             )
 
@@ -386,6 +393,8 @@ def execute(when_kind: str) -> dict[str, Any]:
                 "gate_approved":           len(gate.approved),
                 "gate_rejected":           len(gate.rejected),
                 "gate_unavailable":        len(gate.unavailable),
+                "lifecycle_expired":       len(life.expired),
+                "lifecycle_closed":        len(life.closed),
                 "stocks_in_universe":      counts["stocks"],
                 "etfs_in_universe":        counts["etfs"],
                 "recommendations_emitted": len(emitted_rows),

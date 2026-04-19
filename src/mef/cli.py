@@ -59,24 +59,25 @@ def _add_universe(sub: argparse._SubParsersAction) -> None:
 
 def _add_recommendations(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("recommendations", help="List recommendations by lifecycle state.")
-    p.add_argument("--state", help="Filter by lifecycle state (proposed, active, …).")
+    p.add_argument("--state", help="Filter by lifecycle state (proposed, active, closed_win, ...).")
     p.add_argument("--all", action="store_true", help="Include closed/expired/dismissed.")
+    p.add_argument("--symbol", help="Filter by symbol.")
     p.add_argument("--since", help="Only recs emitted on/after this date (YYYY-MM-DD).")
     p.add_argument("--limit", type=int, help="Max rows to show (default 30).")
-    p.set_defaults(func=_stub("recommendations"))
+    p.set_defaults(func=_run_recommendations)
 
 
 def _add_show(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("show", help="Show full detail on a recommendation or run.")
-    p.add_argument("uid", help="UID such as R-000042 or DR-000007.")
-    p.set_defaults(func=_stub("show"))
+    p = sub.add_parser("show", help="Show full detail on a recommendation.")
+    p.add_argument("uid", help="Recommendation UID (e.g., R-000042).")
+    p.set_defaults(func=_run_show)
 
 
 def _add_dismiss(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("dismiss", help="Mark a proposed recommendation as not-implemented.")
     p.add_argument("rec_uid", help="Recommendation UID (e.g., R-000042).")
     p.add_argument("--note", help="Optional reason.")
-    p.set_defaults(func=_stub("dismiss"))
+    p.set_defaults(func=_run_dismiss)
 
 
 def _add_import_positions(sub: argparse._SubParsersAction) -> None:
@@ -134,6 +135,21 @@ def _run_mef_run(args) -> int:
 def _run_import_positions(args) -> int:
     from mef.commands import import_positions
     return import_positions.run(args)
+
+
+def _run_dismiss(args) -> int:
+    from mef.commands import dismiss
+    return dismiss.run(args)
+
+
+def _run_recommendations(args) -> int:
+    from mef.commands import recommendations
+    return recommendations.run(args)
+
+
+def _run_show(args) -> int:
+    from mef.commands import show
+    return show.run(args)
 
 
 # ───────────────────────────── parser wiring ─────────────────────────────
