@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Logs / runtime artifacts (MEF logs live in /mnt/aftdata/logs/mef)
+*.log
+
+# Secrets / local config (do not commit)
+config/postgres.yaml
+config/mef.yaml
+.env
