@@ -82,7 +82,7 @@ def _add_dismiss(sub: argparse._SubParsersAction) -> None:
 def _add_import_positions(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("import-positions", help="Ingest a Fidelity Portfolio Positions CSV.")
     p.add_argument("csv_path", help="Path to the Fidelity Portfolio Positions CSV.")
-    p.set_defaults(func=_stub("import-positions"))
+    p.set_defaults(func=_run_import_positions)
 
 
 def _add_score(sub: argparse._SubParsersAction) -> None:
@@ -129,6 +129,11 @@ def _run_universe(args) -> int:
 def _run_mef_run(args) -> int:
     from mef.commands import run as run_cmd
     return run_cmd.run(args)
+
+
+def _run_import_positions(args) -> int:
+    from mef.commands import import_positions
+    return import_positions.run(args)
 
 
 # ───────────────────────────── parser wiring ─────────────────────────────
