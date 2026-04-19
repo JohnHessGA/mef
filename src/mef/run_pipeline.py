@@ -1,22 +1,23 @@
 """Daily-run pipeline.
 
-v0 behaviour (now with real evidence):
+End-to-end:
 
 1. Open a ``mef.daily_run`` row (status='running').
 2. Pull latest evidence for the universe via ``mef.evidence``.
-3. Rank every symbol via ``mef.ranker`` — writes one ``mef.candidate`` row
-   per symbol with a posture and a conviction score.
-4. Select survivors (conviction >= threshold, non-no_edge posture, capped
-   at ``max_new_ideas_per_run``) and write ``mef.recommendation`` rows
-   with state ``proposed``.
-5. Close ``daily_run`` (status='ok', counts, ended_at).
-6. Render the email body via ``mef.email_render``.
-7. Return a summary dict (CLI prints; delivery via notify.py lands later).
+3. Rank every symbol via ``mef.ranker`` — one ``mef.candidate`` row each,
+   with posture + conviction_score.
+4. Select top-N by conviction subject to the threshold + cap.
+5. LLM gate: approve or reject each top-N idea.
+6. Write ``mef.recommendation`` rows for approved (and — when LLM is
+   unavailable — unavailable) candidates; stamp gate decision + reason on
+   ``mef.candidate`` for every top-N row whether it shipped or not.
+7. Close ``daily_run`` (status='ok', counts, ended_at).
+8. Render the email body via ``mef.email_render``.
+9. Return a summary dict for CLI printing.
 
 Not yet wired:
-- LLM review over survivors
-- Active-position lifecycle transitions
-- notify.py email delivery
+- notify.py delivery
+- active-position lifecycle transitions
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from mef.config import load_app_config
 from mef.db.connection import connect_mefdb
 from mef.email_render import render_daily_email
 from mef.evidence import EvidenceBundle, pull_latest_evidence
+from mef.llm.gate import GateResult, apply_gate
 from mef.ranker import RankedCandidate, rank, select_for_emission
 from mef.uid import next_uid
 
@@ -113,7 +115,6 @@ def _mark_failed(conn, *, run_uid: str, error_text: str) -> None:
 # ─────────────────────────────────────────────────────────────────────────
 
 def _json_safe(features: dict[str, Any]) -> dict[str, Any]:
-    """Strip non-JSON-serializable values (dates, etc.) to ISO strings."""
     out: dict[str, Any] = {}
     for k, v in features.items():
         if hasattr(v, "isoformat"):
@@ -155,6 +156,32 @@ def _insert_candidates(conn, run_uid: str, candidates: list[RankedCandidate]) ->
     return uid_map
 
 
+def _stamp_gate_decisions(
+    conn,
+    *,
+    candidate_uid_map: dict[str, str],
+    gate: GateResult,
+) -> None:
+    """Write gate decisions + reasons onto mef.candidate for every top-N symbol."""
+    if not gate.decisions:
+        return
+    with conn.cursor() as cur:
+        for sym, dec in gate.decisions.items():
+            uid = candidate_uid_map.get(sym)
+            if not uid:
+                continue
+            cur.execute(
+                """
+                UPDATE mef.candidate
+                   SET llm_gate_decision = %s,
+                       llm_gate_reason   = %s
+                 WHERE uid = %s
+                """,
+                (dec.decision, dec.reason, uid),
+            )
+    conn.commit()
+
+
 def _mark_emitted(conn, candidate_uids: list[str]) -> None:
     if not candidate_uids:
         return
@@ -166,10 +193,28 @@ def _mark_emitted(conn, candidate_uids: list[str]) -> None:
     conn.commit()
 
 
-def _reasoning_text(cand: RankedCandidate) -> str:
-    if not cand.reasoning_notes:
-        return f"{cand.posture} · conviction {cand.conviction_score:.2f}"
-    return "; ".join(cand.reasoning_notes)
+def _compose_reasoning(cand: RankedCandidate, gate_reason: str | None) -> str:
+    """Prefer the LLM's one-sentence reason; fall back to ranker notes."""
+    if gate_reason:
+        return gate_reason
+    if cand.reasoning_notes:
+        return "; ".join(cand.reasoning_notes)
+    return f"{cand.posture} · conviction {cand.conviction_score:.2f}"
+
+
+def _estimated_pnl(cand: RankedCandidate) -> dict[str, float | None]:
+    """Potential gain / loss / R:R per 100 shares, from entry-mid / stop / target."""
+    close = cand.features.get("close")
+    stop = cand.proposed_stop
+    target = cand.proposed_target
+    if close is None or stop is None or target is None:
+        return {"potential_gain_100sh": None, "potential_loss_100sh": None, "risk_reward": None}
+    # Entry mid: middle of the draft entry zone (±1%) — close is already the anchor.
+    entry_mid = close
+    gain = round((target - entry_mid) * 100, 2)
+    loss = round((entry_mid - stop) * 100, 2)
+    rr = round(gain / loss, 2) if loss and loss > 0 else None
+    return {"potential_gain_100sh": gain, "potential_loss_100sh": loss, "risk_reward": rr}
 
 
 def _insert_recommendations(
@@ -177,12 +222,22 @@ def _insert_recommendations(
     run_uid: str,
     survivors: list[RankedCandidate],
     candidate_uid_map: dict[str, str],
+    gate: GateResult,
 ) -> list[dict[str, Any]]:
-    """Insert one recommendation row per survivor and return email-ready dicts."""
+    """Insert one recommendation row per approved or unavailable survivor.
+
+    Rejected ideas are skipped — their gate decision is on mef.candidate only.
+    """
     emitted_rows: list[dict[str, Any]] = []
     with conn.cursor() as cur:
         for cand in survivors:
+            decision = gate.decisions.get(cand.symbol)
+            if decision is None or decision.decision == "reject":
+                continue
+
             uid = next_uid(conn, "recommendation")
+            gate_reason = decision.reason if decision.decision != "unavailable" else None
+            reasoning = _compose_reasoning(cand, gate_reason)
             cur.execute(
                 """
                 INSERT INTO mef.recommendation (
@@ -191,6 +246,7 @@ def _insert_recommendations(
                     stop_level, invalidation_rule,
                     target_level, target_rule,
                     time_exit_date, confidence, reasoning_summary,
+                    llm_review_color,
                     state, state_changed_by
                 )
                 VALUES (
@@ -199,6 +255,7 @@ def _insert_recommendations(
                     %s, %s,
                     %s, %s,
                     %s, %s, %s,
+                    %s,
                     'proposed', 'run'
                 )
                 """,
@@ -214,15 +271,24 @@ def _insert_recommendations(
                     "profit-take at target or on momentum break",
                     cand.proposed_time_exit,
                     cand.conviction_score,
-                    _reasoning_text(cand),
+                    reasoning,
+                    gate_reason,
                 ),
             )
+            pnl = _estimated_pnl(cand)
             emitted_rows.append({
                 "rec_uid":           uid,
                 "symbol":            cand.symbol,
+                "asset_kind":        cand.asset_kind,
                 "posture":           cand.posture,
                 "expression":        cand.proposed_expression,
-                "reasoning_summary": _reasoning_text(cand),
+                "entry_zone":        cand.proposed_entry_zone,
+                "stop":              cand.proposed_stop,
+                "target":            cand.proposed_target,
+                "time_exit":         cand.proposed_time_exit,
+                "llm_gate":          decision.decision,
+                "reasoning_summary": reasoning,
+                **pnl,
             })
     conn.commit()
     return emitted_rows
@@ -233,13 +299,12 @@ def _insert_recommendations(
 # ─────────────────────────────────────────────────────────────────────────
 
 def execute(when_kind: str) -> dict[str, Any]:
-    """Execute one scheduled run. Returns a summary dict suitable for CLI output."""
     if when_kind not in _INTENT:
         raise ValueError(f"when_kind must be premarket|postmarket, got {when_kind!r}")
 
     app_cfg = load_app_config()
     ranker_cfg = app_cfg.get("ranker") or {}
-    conviction_threshold = float(ranker_cfg.get("conviction_threshold", 0.6))
+    conviction_threshold = float(ranker_cfg.get("conviction_threshold", 0.5))
     max_new_ideas = int(ranker_cfg.get("max_new_ideas_per_run", 5))
 
     conn = connect_mefdb()
@@ -253,13 +318,27 @@ def execute(when_kind: str) -> dict[str, Any]:
             all_candidates = rank(evidence)
             candidate_uid_map = _insert_candidates(conn, run_uid, all_candidates)
 
-            survivors = select_for_emission(
+            top_n = select_for_emission(
                 all_candidates,
                 conviction_threshold=conviction_threshold,
                 max_new_ideas=max_new_ideas,
             )
-            _mark_emitted(conn, [candidate_uid_map[c.symbol] for c in survivors])
-            emitted_rows = _insert_recommendations(conn, run_uid, survivors, candidate_uid_map)
+
+            gate = apply_gate(
+                conn,
+                run_uid=run_uid,
+                survivors=top_n,
+                as_of_date=evidence.as_of_date.isoformat(),
+                spy_return_20d=evidence.baseline.get("spy_return_20d"),
+                spy_return_63d=evidence.baseline.get("spy_return_63d"),
+            )
+            _stamp_gate_decisions(conn, candidate_uid_map=candidate_uid_map, gate=gate)
+
+            emitted_rows = _insert_recommendations(
+                conn, run_uid, top_n, candidate_uid_map, gate,
+            )
+            emitted_uids = [candidate_uid_map[row["symbol"]] for row in emitted_rows]
+            _mark_emitted(conn, emitted_uids)
 
             candidates_passed = sum(
                 1 for c in all_candidates
@@ -273,7 +352,13 @@ def execute(when_kind: str) -> dict[str, Any]:
                 symbols_evaluated=symbols_evaluated,
                 candidates_passed=candidates_passed,
                 recommendations_emitted=len(emitted_rows),
-                notes=f"as_of={evidence.as_of_date.isoformat()} threshold={conviction_threshold} cap={max_new_ideas}",
+                notes=(
+                    f"as_of={evidence.as_of_date.isoformat()} "
+                    f"threshold={conviction_threshold} cap={max_new_ideas} "
+                    f"gate_available={gate.available} "
+                    f"approved={len(gate.approved)} rejected={len(gate.rejected)} "
+                    f"unavailable={len(gate.unavailable)}"
+                ),
             )
 
             email = render_daily_email(
@@ -285,6 +370,8 @@ def execute(when_kind: str) -> dict[str, Any]:
                 etfs_in_universe=counts["etfs"],
                 new_ideas=emitted_rows,
                 active_updates=[],
+                llm_gate_available=gate.available,
+                llm_gate_rejected=len(gate.rejected),
             )
             return {
                 "run_uid":                 run_uid,
@@ -294,6 +381,11 @@ def execute(when_kind: str) -> dict[str, Any]:
                 "universe_total":          universe_total,
                 "symbols_evaluated":       symbols_evaluated,
                 "candidates_passed":       candidates_passed,
+                "top_n":                   len(top_n),
+                "gate_available":          gate.available,
+                "gate_approved":           len(gate.approved),
+                "gate_rejected":           len(gate.rejected),
+                "gate_unavailable":        len(gate.unavailable),
                 "stocks_in_universe":      counts["stocks"],
                 "etfs_in_universe":        counts["etfs"],
                 "recommendations_emitted": len(emitted_rows),

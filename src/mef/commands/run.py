@@ -21,6 +21,11 @@ def run(args) -> int:
     print(f"  universe total:          {summary.get('universe_total', '?')}")
     print(f"  symbols evaluated:       {summary.get('symbols_evaluated', '?')}")
     print(f"  candidates passed:       {summary.get('candidates_passed', '?')}")
+    print(f"  top-N sent to gate:      {summary.get('top_n', '?')}")
+    print(f"  gate: available={summary.get('gate_available')} "
+          f"approve={summary.get('gate_approved')} "
+          f"reject={summary.get('gate_rejected')} "
+          f"unavailable={summary.get('gate_unavailable')}")
     print(f"  recommendations emitted: {summary['recommendations_emitted']}")
     print()
     print("Rendered email (delivery not yet wired):")

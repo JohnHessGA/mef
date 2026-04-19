@@ -1,13 +1,12 @@
 """Render the daily email body from a finished run's state.
 
-Pure function — given the run metadata and (eventually) recommendation
-records, produce a plain-text body and a subject line. No I/O, no DB calls,
-no notify.py wiring. The renderer is testable in isolation; wiring comes
-when the run pipeline decides how to deliver.
+Pure function — given the run metadata, emitted ideas, and LLM-gate status,
+produce a plain-text body and a subject line. No I/O, no DB calls, no
+notify.py wiring.
 
-Skeleton behaviour (v0): the list of new ideas and active recommendations
-is empty, so the body always reads "No new trades today." with universe
-health + run metadata. Real content lands alongside the real ranker.
+Each emitted idea carries an estimated P&L block (potential gain / loss
+per 100 shares and risk/reward ratio), computed upstream in
+``mef.run_pipeline``.
 """
 
 from __future__ import annotations
@@ -34,6 +33,52 @@ _INTENT_LABEL = {
 }
 
 
+def _fmt_money(v: float | None) -> str:
+    return f"${v:,.2f}" if v is not None else "n/a"
+
+
+def _fmt_ratio(v: float | None) -> str:
+    return f"{v:.2f}:1" if v is not None else "n/a"
+
+
+def _idea_lines(idx: int, idea: dict[str, Any]) -> list[str]:
+    symbol = idea.get("symbol", "?")
+    posture = idea.get("posture", "?")
+    expression = idea.get("expression", "?")
+    lines = [f"  {idx}. {symbol} — {posture} — {expression}"]
+
+    entry_zone = idea.get("entry_zone")
+    if entry_zone:
+        lines.append(f"     Entry zone: {entry_zone}")
+    stop = idea.get("stop")
+    target = idea.get("target")
+    time_exit = idea.get("time_exit")
+    if stop is not None:
+        lines.append(f"     Stop:       ${stop:,.2f}")
+    if target is not None:
+        lines.append(f"     Target:     ${target:,.2f}")
+    if time_exit is not None:
+        lines.append(f"     Time exit:  {time_exit}")
+
+    gain = idea.get("potential_gain_100sh")
+    loss = idea.get("potential_loss_100sh")
+    rr = idea.get("risk_reward")
+    if gain is not None or loss is not None:
+        lines.append(
+            f"     Per 100 shares: potential +{_fmt_money(gain)} · "
+            f"risk {_fmt_money(loss)} · R:R {_fmt_ratio(rr)}"
+        )
+
+    reasoning = idea.get("reasoning_summary")
+    if reasoning:
+        lines.append(f"     Reasoning:  {reasoning}")
+
+    gate = idea.get("llm_gate")
+    if gate == "unavailable":
+        lines.append("     ⚠ Not reviewed by LLM (gate unavailable).")
+    return lines
+
+
 def render_daily_email(
     *,
     when_kind: str,
@@ -45,6 +90,8 @@ def render_daily_email(
     new_ideas: list[dict[str, Any]] | None = None,
     active_updates: list[dict[str, Any]] | None = None,
     recent_score_summary: str | None = None,
+    llm_gate_available: bool = True,
+    llm_gate_rejected: int = 0,
 ) -> RenderedEmail:
     new_ideas = new_ideas or []
     active_updates = active_updates or []
@@ -65,17 +112,21 @@ def render_daily_email(
         "",
     ]
 
+    if not llm_gate_available:
+        lines.append("⚠ LLM gate was unavailable for this run — ideas below were not reviewed.")
+        lines.append("")
+
     lines.append(f"New ideas ({len(new_ideas)}):")
     if not new_ideas:
         lines.append("  No new trades today.")
+        if llm_gate_rejected:
+            lines.append(f"  (LLM gate rejected {llm_gate_rejected} candidate(s); logged for audit.)")
     else:
         for idx, idea in enumerate(new_ideas, start=1):
-            lines.append(
-                f"  {idx}. {idea.get('symbol','?')} — {idea.get('posture','?')} — "
-                f"{idea.get('expression','?')}"
-            )
-            if reasoning := idea.get("reasoning_summary"):
-                lines.append(f"     {reasoning}")
+            lines.extend(_idea_lines(idx, idea))
+        if llm_gate_rejected:
+            lines.append("")
+            lines.append(f"  (LLM gate also rejected {llm_gate_rejected} candidate(s) from the top list.)")
     lines.append("")
 
     lines.append(f"Active recommendations & tracked positions ({len(active_updates)}):")
