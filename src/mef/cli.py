@@ -32,7 +32,7 @@ def _add_run(sub: argparse._SubParsersAction) -> None:
         choices=["premarket", "postmarket"],
         help="Which scheduled run this is.",
     )
-    p.set_defaults(func=_stub("run"))
+    p.set_defaults(func=_run_mef_run)
 
 
 def _add_status(sub: argparse._SubParsersAction) -> None:
@@ -54,7 +54,7 @@ def _add_universe(sub: argparse._SubParsersAction) -> None:
         choices=["show", "load"],
         help="'show' (default) prints the current universe; 'load' syncs MEFDB from the notes files.",
     )
-    p.set_defaults(func=_stub("universe"))
+    p.set_defaults(func=_run_universe)
 
 
 def _add_recommendations(sub: argparse._SubParsersAction) -> None:
@@ -119,6 +119,16 @@ def _run_status(args) -> int:
 def _run_init_db(args) -> int:
     from mef.commands import init_db
     return init_db.run(args)
+
+
+def _run_universe(args) -> int:
+    from mef.commands import universe
+    return universe.run(args)
+
+
+def _run_mef_run(args) -> int:
+    from mef.commands import run as run_cmd
+    return run_cmd.run(args)
 
 
 # ───────────────────────────── parser wiring ─────────────────────────────
