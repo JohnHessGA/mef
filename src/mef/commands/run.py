@@ -27,7 +27,8 @@ def run(args) -> int:
           f"reject={summary.get('gate_rejected')} "
           f"unavailable={summary.get('gate_unavailable')}")
     print(f"  lifecycle sweep: expired={summary.get('lifecycle_expired', 0)} "
-          f"closed={summary.get('lifecycle_closed', 0)}")
+          f"closed={summary.get('lifecycle_closed', 0)}  "
+          f"scored={summary.get('scored', 0)}")
     print(f"  recommendations emitted: {summary['recommendations_emitted']}")
     print()
     print("Rendered email (delivery not yet wired):")

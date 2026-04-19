@@ -33,6 +33,7 @@ from mef.evidence import EvidenceBundle, pull_latest_evidence
 from mef.lifecycle import sweep as lifecycle_sweep
 from mef.llm.gate import GateResult, apply_gate
 from mef.ranker import RankedCandidate, rank, select_for_emission
+from mef.scoring import score_all_pending
 from mef.uid import next_uid
 
 _INTENT = {
@@ -352,6 +353,9 @@ def execute(when_kind: str) -> dict[str, Any]:
             )
             symbols_evaluated = len(all_candidates)
 
+            # Score any newly-closed recs from the lifecycle sweep.
+            scoring = score_all_pending()
+
             _close_daily_run(
                 conn,
                 run_uid=run_uid,
@@ -364,7 +368,8 @@ def execute(when_kind: str) -> dict[str, Any]:
                     f"gate_available={gate.available} "
                     f"approved={len(gate.approved)} rejected={len(gate.rejected)} "
                     f"unavailable={len(gate.unavailable)} "
-                    f"expired={len(life.expired)} closed={len(life.closed)}"
+                    f"expired={len(life.expired)} closed={len(life.closed)} "
+                    f"scored={len(scoring.new_rows)}"
                 ),
             )
 
@@ -395,6 +400,7 @@ def execute(when_kind: str) -> dict[str, Any]:
                 "gate_unavailable":        len(gate.unavailable),
                 "lifecycle_expired":       len(life.expired),
                 "lifecycle_closed":        len(life.closed),
+                "scored":                  len(scoring.new_rows),
                 "stocks_in_universe":      counts["stocks"],
                 "etfs_in_universe":        counts["etfs"],
                 "recommendations_emitted": len(emitted_rows),

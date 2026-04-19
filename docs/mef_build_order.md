@@ -15,8 +15,8 @@ land so any future reader can see where we are without grepping commits.
 | ✅ done | 5 | LLM gate                          | Claude-CLI integration (`mef.llm_trace`), approve/reject prompt, `mef.candidate.llm_gate_decision` + `llm_gate_reason` audit trail, fallback on LLM failure               |
 | ✅ done | 6 | Position tracking                 | `mef import-positions <csv>`, sha256-deduped `mef.import_batch`, per-position `position_snapshot`, auto-activation of proposed recs when a matching holding appears       |
 | ✅ done | 7 | Recommendation lifecycle commands | `mef dismiss`, `mef recommendations`, `mef show`, auto-expiration at entry window end, auto-close-on-disappearance with win/loss/timeout classification from last known price |
-| ⏳ next | 8 | Scoring                           | `mef score`, `mef.score` rows, estimated 100-share P&L, SPY + sector-ETF benchmark comparisons, refined outcome classification                                          |
-|         | 9 | Email delivery                    | `notify.py --source MEF`, two scheduled cron entries (pre-market + post-market), real send path with rendered email                                                      |
+| ✅ done | 8 | Scoring                           | `mef score`, `mef.score` rows, estimated 100-share P&L, SPY + sector-ETF benchmark comparisons, refined outcome classification, plus `mef rejections` audit command       |
+| ⏳ next | 9 | Email delivery                    | `notify.py --source MEF`, two scheduled cron entries (pre-market + post-market), real send path with rendered email                                                      |
 |         | 10 | Overwatch telemetry              | `ow.mef_run` + `ow.mef_event` tables, fail-silent writes, MEF dashboards in Grafana                                                                                      |
 |         | 11 | Tuning + polish                   | Evidence-weight tuning based on scoring history, LLM prompt iteration, richer email formatting, optional `mef.benchmark_snapshot` cache                                  |
 

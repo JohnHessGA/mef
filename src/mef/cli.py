@@ -88,7 +88,15 @@ def _add_import_positions(sub: argparse._SubParsersAction) -> None:
 
 def _add_score(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("score", help="Refresh scoring on closed recommendations.")
-    p.set_defaults(func=_stub("score"))
+    p.set_defaults(func=_run_score)
+
+
+def _add_rejections(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser("rejections", help="List LLM-rejected candidates for audit.")
+    p.add_argument("--symbol", help="Filter by symbol.")
+    p.add_argument("--since", help="Only rejections on/after this date (YYYY-MM-DD).")
+    p.add_argument("--limit", type=int, help="Max rows to show (default 20).")
+    p.set_defaults(func=_run_rejections)
 
 
 def _add_report(sub: argparse._SubParsersAction) -> None:
@@ -152,6 +160,16 @@ def _run_show(args) -> int:
     return show.run(args)
 
 
+def _run_score(args) -> int:
+    from mef.commands import score
+    return score.run(args)
+
+
+def _run_rejections(args) -> int:
+    from mef.commands import rejections
+    return rejections.run(args)
+
+
 # ───────────────────────────── parser wiring ─────────────────────────────
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -169,6 +187,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_dismiss(sub)
     _add_import_positions(sub)
     _add_score(sub)
+    _add_rejections(sub)
     _add_report(sub)
     return parser
 
