@@ -1,0 +1,22 @@
+# MEF — Muse Engine Forecaster cron entries.
+#
+# Two scheduled runs per trading day. America/New_York times.
+#   07:00 ET pre-market   → recommendations meant for execution today after 10:00 ET
+#   17:30 ET post-market  → recommendations meant for the next trading day
+#
+# Both entries call the mef CLI directly (per AFT cron convention — no
+# wrapper scripts that do real work). Venv path + log redirection are the
+# only plumbing.
+#
+# Install:
+#   crontab -e
+#   # paste the two lines below
+#
+# Verify:
+#   crontab -l | grep mef
+#   tail -f /mnt/aftdata/logs/mef/cron.log
+
+CRON_TZ=America/New_York
+
+0  7 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run --when premarket  >> /mnt/aftdata/logs/mef/cron.log 2>&1
+30 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run --when postmarket >> /mnt/aftdata/logs/mef/cron.log 2>&1

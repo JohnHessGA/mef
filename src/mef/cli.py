@@ -32,6 +32,11 @@ def _add_run(sub: argparse._SubParsersAction) -> None:
         choices=["premarket", "postmarket"],
         help="Which scheduled run this is.",
     )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run the full pipeline but skip sending the email.",
+    )
     p.set_defaults(func=_run_mef_run)
 
 

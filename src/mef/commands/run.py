@@ -12,7 +12,7 @@ from mef.run_pipeline import execute
 
 
 def run(args) -> int:
-    summary = execute(args.when)
+    summary = execute(args.when, dry_run=getattr(args, "dry_run", False))
 
     print(f"MEF run — {summary['when_kind']} ({summary['intent']})")
     print("=" * 46)
@@ -30,8 +30,16 @@ def run(args) -> int:
           f"closed={summary.get('lifecycle_closed', 0)}  "
           f"scored={summary.get('scored', 0)}")
     print(f"  recommendations emitted: {summary['recommendations_emitted']}")
+
+    send = summary.get("email_send") or {}
+    if send.get("sent"):
+        print(f"  email: sent to {', '.join(send.get('recipients') or [])} at {send.get('sent_at')}")
+    elif send.get("skipped_reason"):
+        print(f"  email: skipped ({send['skipped_reason']})")
+    elif send.get("error"):
+        print(f"  email: NOT SENT — {send['error']}")
     print()
-    print("Rendered email (delivery not yet wired):")
+    print("Rendered email body:")
     print("-" * 46)
     print(f"Subject: {summary['email_subject']}")
     print()

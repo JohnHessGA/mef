@@ -29,6 +29,7 @@ from typing import Any
 from mef.config import load_app_config
 from mef.db.connection import connect_mefdb
 from mef.email_render import render_daily_email
+from mef.email_send import send_daily_email
 from mef.evidence import EvidenceBundle, pull_latest_evidence
 from mef.lifecycle import sweep as lifecycle_sweep
 from mef.llm.gate import GateResult, apply_gate
@@ -300,7 +301,16 @@ def _insert_recommendations(
 # Orchestrator
 # ─────────────────────────────────────────────────────────────────────────
 
-def execute(when_kind: str) -> dict[str, Any]:
+def _stamp_email_sent(conn, run_uid: str, sent_at: datetime) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE mef.daily_run SET email_sent_at = %s WHERE uid = %s",
+            (sent_at, run_uid),
+        )
+    conn.commit()
+
+
+def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
     if when_kind not in _INTENT:
         raise ValueError(f"when_kind must be premarket|postmarket, got {when_kind!r}")
 
@@ -385,6 +395,21 @@ def execute(when_kind: str) -> dict[str, Any]:
                 llm_gate_available=gate.available,
                 llm_gate_rejected=len(gate.rejected),
             )
+
+            if dry_run:
+                send_status = {"sent": False, "skipped_reason": "dry-run"}
+            else:
+                send_result = send_daily_email(subject=email.subject, body=email.body)
+                if send_result.ok and send_result.sent_at:
+                    _stamp_email_sent(conn, run_uid, send_result.sent_at)
+                send_status = {
+                    "sent":           send_result.ok,
+                    "recipients":     send_result.recipients,
+                    "sent_at":        send_result.sent_at.isoformat() if send_result.sent_at else None,
+                    "error":          send_result.error,
+                    "skipped_reason": send_result.skipped_reason,
+                }
+
             return {
                 "run_uid":                 run_uid,
                 "when_kind":               when_kind,
@@ -407,6 +432,7 @@ def execute(when_kind: str) -> dict[str, Any]:
                 "survivors":               emitted_rows,
                 "email_subject":           email.subject,
                 "email_body":              email.body,
+                "email_send":              send_status,
             }
         except Exception as exc:
             _mark_failed(conn, run_uid=run_uid, error_text=repr(exc))
