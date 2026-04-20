@@ -24,6 +24,7 @@ def run(args) -> int:
     print(f"  top-N sent to gate:      {summary.get('top_n', '?')}")
     print(f"  gate: available={summary.get('gate_available')} "
           f"approve={summary.get('gate_approved')} "
+          f"review={summary.get('gate_review', 0)} "
           f"reject={summary.get('gate_rejected')} "
           f"unavailable={summary.get('gate_unavailable')}")
     print(f"  lifecycle sweep: expired={summary.get('lifecycle_expired', 0)} "
