@@ -35,6 +35,12 @@ from mef.lifecycle import sweep as lifecycle_sweep
 from mef.llm.gate import GateResult, apply_gate
 from mef.ranker import RankedCandidate, rank, select_for_emission
 from mef.scoring import score_all_pending
+from mef.telemetry import (
+    complete_run as ow_complete_run,
+    event as ow_event,
+    fail_run as ow_fail_run,
+    start_run as ow_start_run,
+)
 from mef.uid import next_uid
 
 _INTENT = {
@@ -322,11 +328,22 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
     conn = connect_mefdb()
     try:
         run_uid, started_at = _open_daily_run(conn, when_kind)
+        ow_start_run(
+            run_uid=run_uid, when_kind=when_kind,
+            intent=_INTENT[when_kind], started_at=started_at,
+        )
+        ow_event(severity="info", code="run_started", message=f"{when_kind}", run_uid=run_uid)
         try:
             # Lifecycle sweep before generating new ideas — catches any
             # proposed rec whose entry window has closed, and any active
             # rec whose symbol disappeared from the latest import.
             life = lifecycle_sweep()
+            if life.expired or life.closed:
+                ow_event(
+                    severity="info", code="lifecycle_sweep",
+                    message=f"expired={len(life.expired)} closed={len(life.closed)}",
+                    run_uid=run_uid,
+                )
 
             counts = _universe_counts(conn)
             universe_total = counts["stocks"] + counts["etfs"]
@@ -350,6 +367,12 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 spy_return_63d=evidence.baseline.get("spy_return_63d"),
             )
             _stamp_gate_decisions(conn, candidate_uid_map=candidate_uid_map, gate=gate)
+            if not gate.available:
+                ow_event(
+                    severity="warning", code="gate_unavailable",
+                    message="LLM gate unavailable — ideas shipped without review",
+                    run_uid=run_uid,
+                )
 
             emitted_rows = _insert_recommendations(
                 conn, run_uid, top_n, candidate_uid_map, gate,
@@ -398,10 +421,22 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
 
             if dry_run:
                 send_status = {"sent": False, "skipped_reason": "dry-run"}
+                ow_event(severity="info", code="email_dry_run", run_uid=run_uid)
             else:
                 send_result = send_daily_email(subject=email.subject, body=email.body)
                 if send_result.ok and send_result.sent_at:
                     _stamp_email_sent(conn, run_uid, send_result.sent_at)
+                    ow_event(
+                        severity="info", code="email_sent",
+                        message=", ".join(send_result.recipients),
+                        run_uid=run_uid,
+                    )
+                else:
+                    ow_event(
+                        severity="warning", code="email_not_sent",
+                        message=send_result.error or send_result.skipped_reason or "unknown",
+                        run_uid=run_uid,
+                    )
                 send_status = {
                     "sent":           send_result.ok,
                     "recipients":     send_result.recipients,
@@ -409,6 +444,22 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                     "error":          send_result.error,
                     "skipped_reason": send_result.skipped_reason,
                 }
+
+            ow_complete_run(
+                run_uid=run_uid, started_at=started_at,
+                counts={
+                    "symbols_evaluated":       symbols_evaluated,
+                    "candidates_passed":       candidates_passed,
+                    "recommendations_emitted": len(emitted_rows),
+                    "gate_approved":           len(gate.approved),
+                    "gate_rejected":           len(gate.rejected),
+                    "gate_unavailable":        len(gate.unavailable),
+                    "lifecycle_expired":       len(life.expired),
+                    "lifecycle_closed":        len(life.closed),
+                    "scored":                  len(scoring.new_rows),
+                },
+                email_sent=send_status.get("sent", False),
+            )
 
             return {
                 "run_uid":                 run_uid,
@@ -436,6 +487,8 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
             }
         except Exception as exc:
             _mark_failed(conn, run_uid=run_uid, error_text=repr(exc))
+            ow_fail_run(run_uid=run_uid, started_at=started_at, error_text=repr(exc))
+            ow_event(severity="error", code="run_failed", message=repr(exc), run_uid=run_uid)
             raise
     finally:
         conn.close()

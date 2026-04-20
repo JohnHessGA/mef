@@ -17,8 +17,8 @@ land so any future reader can see where we are without grepping commits.
 | ✅ done | 7 | Recommendation lifecycle commands | `mef dismiss`, `mef recommendations`, `mef show`, auto-expiration at entry window end, auto-close-on-disappearance with win/loss/timeout classification from last known price |
 | ✅ done | 8 | Scoring                           | `mef score`, `mef.score` rows, estimated 100-share P&L, SPY + sector-ETF benchmark comparisons, refined outcome classification, plus `mef rejections` audit command       |
 | ✅ done | 9 | Email delivery                    | Direct SMTP via `smtplib` (uses MDC's `notifications.yaml` for credentials, MEF's own recipients), `--dry-run` flag for preview, two-entry cron template at `cron/mef.cron`, install docs at `docs/mef_cron.md`. **Not** via notify.py — that script forces its own subject/body wrapper which would mangle MEF's two-section daily report. |
-| ⏳ next | 10 | Overwatch telemetry              | `ow.mef_run` + `ow.mef_event` tables, fail-silent writes, MEF dashboards in Grafana                                                                                      |
-|         | 11 | Tuning + polish                   | Evidence-weight tuning based on scoring history, LLM prompt iteration, richer email formatting, optional `mef.benchmark_snapshot` cache                                  |
+| ✅ done | 10 | Overwatch telemetry              | `ow.mef_run` (one row per run with full counts + duration + email status) and `ow.mef_event` (info/warning/error events) live; writes are fail-silent so an overwatch outage never breaks a run. Grafana dashboards still TBD (milestone 11). |
+| ⏳ next | 11 | Tuning + polish                   | Evidence-weight tuning based on scoring history, LLM prompt iteration, richer email formatting, optional `mef.benchmark_snapshot` cache, Grafana MEF dashboards over the new `ow.mef_*` tables |
 
 Items past #11 (web UI, DAS integration, RSE integration, long-option scoring, broader evidence families) remain explicitly out of scope for v1 — see `docs/README_mef.md` §"Hard Boundaries".
 

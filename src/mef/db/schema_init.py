@@ -1,8 +1,12 @@
-"""Apply MEFDB migration files under `sql/mefdb/` in numeric order.
+"""Apply MEFDB and Overwatch migration files.
 
-Idempotent — each `.sql` file uses CREATE ... IF NOT EXISTS and safe DO blocks.
-This module orchestrates discovery + ordered application only. No migrations-
-tracking table; files are safe to re-apply.
+- ``sql/mefdb/*.sql``     → applied to the ``mefdb`` database (schema ``mef``)
+- ``sql/overwatch/*.sql`` → applied to the ``overwatch`` database (schema ``ow``)
+
+Each `.sql` file is idempotent (CREATE ... IF NOT EXISTS, ALTER TABLE ADD
+COLUMN IF NOT EXISTS, DO blocks for constraints). The runner just discovers
+files in numeric order and ships them through psycopg2 with psql backslash
+directives stripped.
 """
 
 from __future__ import annotations
@@ -10,28 +14,19 @@ from __future__ import annotations
 import re
 import time
 from pathlib import Path
+from typing import Callable
 
-from mef.db.connection import connect_mefdb
+from mef.db.connection import connect_mefdb, connect_overwatch
 
-_SQL_DIR_CANDIDATES = [
-    Path(__file__).resolve().parents[3] / "sql" / "mefdb",
-]
+_MEFDB_DIR = Path(__file__).resolve().parents[3] / "sql" / "mefdb"
+_OVERWATCH_DIR = Path(__file__).resolve().parents[3] / "sql" / "overwatch"
 
 _FILENAME_RE = re.compile(r"^(\d+)_.+\.sql$")
 
 
-def _find_sql_dir() -> Path:
-    for candidate in _SQL_DIR_CANDIDATES:
-        if candidate.is_dir():
-            return candidate
-    raise FileNotFoundError(
-        f"Could not locate sql/mefdb/ directory. Tried: {_SQL_DIR_CANDIDATES}"
-    )
-
-
-def list_migrations(sql_dir: Path | None = None) -> list[Path]:
-    """Return migration files sorted by their numeric prefix."""
-    sql_dir = sql_dir or _find_sql_dir()
+def _list_migrations(sql_dir: Path) -> list[Path]:
+    if not sql_dir.is_dir():
+        return []
     entries: list[tuple[int, Path]] = []
     for p in sql_dir.iterdir():
         match = _FILENAME_RE.match(p.name)
@@ -42,14 +37,18 @@ def list_migrations(sql_dir: Path | None = None) -> list[Path]:
     return [p for _, p in entries]
 
 
-def apply_migrations() -> list[tuple[Path, float]]:
-    """Apply every migration in order. Return [(path, elapsed_seconds)]."""
-    migrations = list_migrations()
+def list_migrations(sql_dir: Path | None = None) -> list[Path]:
+    """Backwards-compatible: defaults to mefdb migrations only."""
+    return _list_migrations(sql_dir or _MEFDB_DIR)
+
+
+def _apply(sql_dir: Path, connect: Callable) -> list[tuple[Path, float]]:
+    migrations = _list_migrations(sql_dir)
     if not migrations:
         return []
 
     applied: list[tuple[Path, float]] = []
-    conn = connect_mefdb()
+    conn = connect()
     try:
         for path in migrations:
             start = time.monotonic()
@@ -63,13 +62,26 @@ def apply_migrations() -> list[tuple[Path, float]]:
     return applied
 
 
-def _strip_psql_directives(sql: str) -> str:
-    """Remove psql-only backslash directives so psycopg2 can run the file.
+def apply_migrations() -> list[tuple[Path, float]]:
+    """Apply MEFDB migrations only (preserved for callers that don't want overwatch)."""
+    return _apply(_MEFDB_DIR, connect_mefdb)
 
-    Lines starting with \\ (e.g. \\echo, \\set, \\gexec) are psql client
-    features, not server SQL. They're harmless when the file is run via
-    `psql -f`, but psycopg2 doesn't understand them.
-    """
+
+def apply_overwatch_migrations() -> list[tuple[Path, float]]:
+    """Apply overwatch migrations against the overwatch database."""
+    return _apply(_OVERWATCH_DIR, connect_overwatch)
+
+
+def apply_all_migrations() -> dict[str, list[tuple[Path, float]]]:
+    """Apply both MEFDB and overwatch migrations. Each set runs in its own connection."""
+    return {
+        "mefdb":     apply_migrations(),
+        "overwatch": apply_overwatch_migrations(),
+    }
+
+
+def _strip_psql_directives(sql: str) -> str:
+    """Remove psql-only backslash directives so psycopg2 can run the file."""
     keep: list[str] = []
     for line in sql.splitlines():
         if line.lstrip().startswith("\\"):
