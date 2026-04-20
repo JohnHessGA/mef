@@ -92,6 +92,9 @@ def render_daily_email(
     recent_score_summary: str | None = None,
     llm_gate_available: bool = True,
     llm_gate_rejected: int = 0,
+    llm_gate_review: int = 0,
+    staleness_warning: str | None = None,
+    staleness_aborted: bool = False,
 ) -> RenderedEmail:
     new_ideas = new_ideas or []
     active_updates = active_updates or []
@@ -100,6 +103,8 @@ def render_daily_email(
     date_label = started_at.strftime("%Y-%m-%d")
     intent_label = _INTENT_LABEL.get(intent, intent)
     subject = f"{subject_prefix} — {date_label} ({intent_label})"
+    if staleness_aborted:
+        subject = f"[STALE DATA] {subject}"
 
     lines: list[str] = [
         f"{subject_prefix}",
@@ -112,21 +117,40 @@ def render_daily_email(
         "",
     ]
 
-    if not llm_gate_available:
+    if staleness_aborted:
+        lines.append("⛔ RUN ABORTED — input data is too stale to trust.")
+        lines.append(f"   {staleness_warning}")
+        lines.append("   No ideas were generated this run. Check whether the UDC daily")
+        lines.append("   harvest succeeded; once the mart tables are fresh again, the")
+        lines.append("   next scheduled run will resume normal operation.")
+        lines.append("")
+    elif staleness_warning:
+        lines.append("⚠ Input data is older than expected — proceeding with caution.")
+        lines.append(f"   {staleness_warning}")
+        lines.append("")
+
+    if not llm_gate_available and not staleness_aborted:
         lines.append("⚠ LLM gate was unavailable for this run — ideas below were not reviewed.")
         lines.append("")
 
     lines.append(f"New ideas ({len(new_ideas)}):")
     if not new_ideas:
         lines.append("  No new trades today.")
-        if llm_gate_rejected:
-            lines.append(f"  (LLM gate rejected {llm_gate_rejected} candidate(s); logged for audit.)")
     else:
         for idx, idea in enumerate(new_ideas, start=1):
             lines.extend(_idea_lines(idx, idea))
-        if llm_gate_rejected:
-            lines.append("")
-            lines.append(f"  (LLM gate also rejected {llm_gate_rejected} candidate(s) from the top list.)")
+
+    # Quiet footer noting what was withheld from the email — concise.
+    # Both review and reject items live in the DB; the user can pull them
+    # via `mef recommendations --state proposed` and `mef rejections`.
+    held_parts: list[str] = []
+    if llm_gate_review:
+        held_parts.append(f"{llm_gate_review} held for review")
+    if llm_gate_rejected:
+        held_parts.append(f"{llm_gate_rejected} rejected")
+    if held_parts:
+        lines.append("")
+        lines.append(f"  Also from this run: {', '.join(held_parts)} (logged for audit).")
     lines.append("")
 
     lines.append(f"Active recommendations & tracked positions ({len(active_updates)}):")

@@ -10,19 +10,51 @@ Rules (v1, match ``docs/mef_design_spec.md`` §7.3):
   missing) must be within ``entry_price_tolerance_pct`` of the midpoint
   of the draft entry zone parsed from the proposed recommendation.
 
-On a match we flip state ``proposed → active`` and link
-``active_match_position_uid``.
+On a match we flip state ``proposed → active``, link
+``active_match_position_uid``, and stamp ``provenance`` based on when
+the position first appeared in our import history relative to the rec's
+creation date and entry window. See ``infer_provenance`` for the rule.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
 from mef.config import load_app_config
 from mef.db.connection import connect_mefdb
+
+
+def infer_provenance(
+    *,
+    earliest_position_date: date | None,
+    rec_created_date: date,
+    entry_window_end: date | None,
+) -> str:
+    """Classify how a position came to match a recommendation.
+
+    Pure function — caller injects the dates so this is testable without
+    a DB. ``earliest_position_date`` is the min ``as_of_date`` for this
+    symbol across the entire ``mef.position_snapshot`` history.
+
+    Returns one of: 'mef_attributed' | 'pre_existing' | 'independent'.
+
+    Rules (per docs and 2026-04-19 design discussion):
+      - earliest < rec_created       → pre_existing
+      - rec_created <= earliest <= entry_window_end → mef_attributed
+      - else (after window, or no entry_window_end) → independent
+      - earliest is None             → independent (no history)
+    """
+    if earliest_position_date is None:
+        return "independent"
+    if earliest_position_date < rec_created_date:
+        return "pre_existing"
+    if entry_window_end is not None and earliest_position_date <= entry_window_end:
+        return "mef_attributed"
+    return "independent"
 
 
 @dataclass
@@ -82,6 +114,8 @@ def _load_proposed(conn) -> list[dict[str, Any]]:
             )
             SELECT DISTINCT ON (r.symbol)
                    r.uid, r.symbol, r.entry_method,
+                   r.created_at::date AS rec_created_date,
+                   r.entry_window_end,
                    c.proposed_entry_zone
               FROM mef.recommendation r
               LEFT JOIN mef.candidate c ON c.uid = r.candidate_uid
@@ -92,6 +126,27 @@ def _load_proposed(conn) -> list[dict[str, Any]]:
         )
         cols = [d[0] for d in cur.description]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def _earliest_position_dates(conn, symbols: list[str]) -> dict[str, date]:
+    """Return {symbol: earliest as_of_date in mef.position_snapshot}.
+
+    Symbols never seen in any import are absent from the dict.
+    """
+    if not symbols:
+        return {}
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT symbol, MIN(as_of_date) AS earliest
+              FROM mef.position_snapshot
+             WHERE symbol = ANY(%s)
+               AND as_of_date IS NOT NULL
+             GROUP BY symbol
+            """,
+            (symbols,),
+        )
+        return {row[0]: row[1] for row in cur.fetchall()}
 
 
 def _load_latest_positions_by_symbol(conn, import_uid: str) -> dict[str, dict[str, Any]]:
@@ -121,6 +176,7 @@ def _promote(
     *,
     rec_uid: str,
     position_uid: str,
+    provenance: str,
 ) -> None:
     with conn.cursor() as cur:
         cur.execute(
@@ -130,11 +186,13 @@ def _promote(
                    state_changed_at          = now(),
                    state_changed_by          = 'import',
                    active_match_position_uid = %s,
+                   provenance                = %s,
+                   provenance_set_by         = 'activator',
                    updated_at                = now()
              WHERE uid = %s
                AND state = 'proposed'
             """,
-            (position_uid, rec_uid),
+            (position_uid, provenance, rec_uid),
         )
     conn.commit()
 
@@ -155,6 +213,9 @@ def activate_from_latest_import() -> ActivationResult:
 
         positions = _load_latest_positions_by_symbol(conn, import_uid)
         proposed = _load_proposed(conn)
+        # Earliest position date per symbol drives provenance inference.
+        symbols_to_check = [r["symbol"] for r in proposed if positions.get(r["symbol"])]
+        earliest_dates = _earliest_position_dates(conn, symbols_to_check)
 
         activated: list[dict[str, Any]] = []
         for rec in proposed:
@@ -179,7 +240,14 @@ def activate_from_latest_import() -> ActivationResult:
             if delta_frac > tol_frac:
                 continue
 
-            _promote(conn, rec_uid=rec["uid"], position_uid=pos["uid"])
+            provenance = infer_provenance(
+                earliest_position_date=earliest_dates.get(rec["symbol"]),
+                rec_created_date=rec["rec_created_date"],
+                entry_window_end=rec["entry_window_end"],
+            )
+            _promote(
+                conn, rec_uid=rec["uid"], position_uid=pos["uid"], provenance=provenance,
+            )
             activated.append({
                 "rec_uid":          rec["uid"],
                 "symbol":           rec["symbol"],
@@ -188,6 +256,7 @@ def activate_from_latest_import() -> ActivationResult:
                 "anchor_price":     float(anchor),
                 "entry_midpoint":   float(midpoint),
                 "delta_fraction":   float(delta_frac),
+                "provenance":       provenance,
             })
         return ActivationResult(activated=activated, considered=len(proposed))
     finally:

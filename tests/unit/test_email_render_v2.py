@@ -66,7 +66,7 @@ def test_rejected_counter_when_all_rejected():
         llm_gate_rejected=5,
     )
     assert "No new trades today." in email.body
-    assert "rejected 5 candidate(s)" in email.body
+    assert "5 rejected" in email.body
 
 
 def test_rejected_counter_when_partial():
@@ -77,4 +77,60 @@ def test_rejected_counter_when_partial():
         new_ideas=[_idea()],
         llm_gate_rejected=2,
     )
-    assert "rejected 2 candidate(s) from the top list" in email.body
+    assert "2 rejected" in email.body
+
+
+def test_review_count_in_footer_when_present():
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-7", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea()],
+        llm_gate_review=3,
+        llm_gate_rejected=2,
+    )
+    # Both held-and-rejected counts appear in the same "Also from this run" line.
+    assert "3 held for review" in email.body
+    assert "2 rejected" in email.body
+    assert "Also from this run" in email.body
+
+
+def test_review_only_no_rejected():
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-8", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea()],
+        llm_gate_review=2,
+    )
+    assert "2 held for review" in email.body
+    assert "rejected" not in email.body.lower() or "Also from this run: 2 held" in email.body
+
+
+def test_staleness_warning_banner_when_warn_only():
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-5", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea()],
+        staleness_warning="latest mart bar_date=2026-04-13 is 6 day(s) behind today",
+    )
+    assert "older than expected" in email.body
+    assert "2026-04-13" in email.body
+    assert "[STALE DATA]" not in email.subject  # warn-only doesn't tag the subject
+
+
+def test_staleness_aborted_tags_subject_and_skips_ideas_section():
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-6", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[],
+        staleness_warning="latest mart bar_date=2026-04-10 is 9 day(s) behind today",
+        staleness_aborted=True,
+    )
+    assert email.subject.startswith("[STALE DATA] ")
+    assert "RUN ABORTED" in email.body
+    assert "2026-04-10" in email.body
+    # User should still see the universe header so they know what was checked.
+    assert "Universe: 305 stocks" in email.body

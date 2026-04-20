@@ -22,6 +22,8 @@ UID_PREFIX: dict[str, str] = {
     "import_batch":          "I",
     "position_snapshot":     "P",
     "score":                 "S",
+    "shadow_score":          "SS",
+    "paper_score":           "PS",
     "llm_trace":             "L",
 }
 

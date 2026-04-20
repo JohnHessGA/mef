@@ -33,20 +33,54 @@ def test_extract_json_block_trailing_prose():
     assert extract_json_block(text) == '{"reviews": []}'
 
 
-def test_parse_gate_response_happy():
-    text = '{"reviews":[{"symbol":"AAPL","decision":"approve","reason":"coherent"},{"symbol":"STX","decision":"reject","reason":"too stretched"}]}'
+def test_parse_gate_response_happy_three_way():
+    # Each tuple is (decision, issue_type, reason).
+    text = (
+        '{"reviews":['
+        '{"symbol":"AAPL","decision":"approve","issue_type":"none","reason":"coherent"},'
+        '{"symbol":"NVDA","decision":"review","issue_type":"missing_context","reason":"borderline"},'
+        '{"symbol":"STX","decision":"reject","issue_type":"risk_shape","reason":"too stretched"}'
+        ']}'
+    )
     out = _parse_gate_response(text)
     assert out == {
-        "AAPL": ("approve", "coherent"),
-        "STX":  ("reject",  "too stretched"),
+        "AAPL": ("approve", "none", "coherent"),
+        "NVDA": ("review", "missing_context", "borderline"),
+        "STX":  ("reject", "risk_shape", "too stretched"),
     }
 
 
 def test_parse_gate_response_ignores_unknown_decision():
-    text = '{"reviews":[{"symbol":"A","decision":"maybe","reason":"idk"},{"symbol":"B","decision":"approve","reason":""}]}'
+    text = (
+        '{"reviews":['
+        '{"symbol":"A","decision":"maybe","issue_type":"none","reason":"idk"},'
+        '{"symbol":"B","decision":"approve","issue_type":"none","reason":""}'
+        ']}'
+    )
     out = _parse_gate_response(text)
     assert "A" not in out                        # maybe is not a valid decision
-    assert out["B"] == ("approve", "")
+    assert out["B"] == ("approve", "none", "")
+
+
+def test_parse_gate_response_coerces_unknown_issue_type_for_approve():
+    # Unknown issue_type on an approve becomes 'none' (most-permissive default).
+    text = '{"reviews":[{"symbol":"A","decision":"approve","issue_type":"made_up","reason":"x"}]}'
+    out = _parse_gate_response(text)
+    assert out["A"] == ("approve", "none", "x")
+
+
+def test_parse_gate_response_coerces_unknown_issue_type_for_reject():
+    # Unknown issue_type on a reject/review becomes 'missing_context' (most-conservative).
+    text = '{"reviews":[{"symbol":"A","decision":"reject","issue_type":"weird","reason":"x"}]}'
+    out = _parse_gate_response(text)
+    assert out["A"] == ("reject", "missing_context", "x")
+
+
+def test_parse_gate_response_missing_issue_type_uses_safe_default():
+    # No issue_type field at all → fall through the same coercion path.
+    text = '{"reviews":[{"symbol":"A","decision":"review","reason":"x"}]}'
+    out = _parse_gate_response(text)
+    assert out["A"] == ("review", "missing_context", "x")
 
 
 def test_parse_gate_response_missing_reviews_raises():

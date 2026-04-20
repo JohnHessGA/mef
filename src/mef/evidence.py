@@ -32,6 +32,78 @@ class EvidenceBundle:
     symbols: dict[str, dict[str, Any]]     # {"AAPL": {...features...}, ...}
 
 
+@dataclass(frozen=True)
+class FreshnessReport:
+    """How stale the latest mart bar is, relative to a reference 'today'.
+
+    ``status`` is one of:
+      - ``ok``    — within ``warn_after_calendar_days``
+      - ``warn``  — past warn threshold, still under abort threshold
+      - ``abort`` — past abort threshold; pipeline must short-circuit
+      - ``empty`` — no bars at all (universe symbols have no mart coverage)
+
+    ``message`` is a short human-readable summary safe to put in an email
+    banner or a telemetry event. Pure data — no I/O.
+    """
+    status: str          # ok | warn | abort | empty
+    age_days: int | None
+    as_of_date: date | None
+    today: date
+    warn_threshold: int
+    abort_threshold: int
+    message: str
+
+    @property
+    def should_abort(self) -> bool:
+        return self.status in ("abort", "empty")
+
+    @property
+    def should_warn(self) -> bool:
+        return self.status in ("warn", "abort", "empty")
+
+
+def check_freshness(
+    bundle: EvidenceBundle,
+    *,
+    today: date,
+    warn_after_calendar_days: int,
+    abort_after_calendar_days: int,
+) -> FreshnessReport:
+    """Classify how stale the bundle's latest bar is relative to ``today``.
+
+    Pure function — caller injects ``today`` so this is testable without
+    freezing the clock. Threshold semantics are *strictly greater than*:
+    age == warn_threshold is still ok; age == warn_threshold + 1 warns.
+    """
+    if not bundle.symbols:
+        return FreshnessReport(
+            status="empty", age_days=None, as_of_date=None, today=today,
+            warn_threshold=warn_after_calendar_days,
+            abort_threshold=abort_after_calendar_days,
+            message="No mart data found for any universe symbol.",
+        )
+
+    age = (today - bundle.as_of_date).days
+    if age > abort_after_calendar_days:
+        status = "abort"
+    elif age > warn_after_calendar_days:
+        status = "warn"
+    else:
+        status = "ok"
+
+    msg = (
+        f"latest mart bar_date={bundle.as_of_date.isoformat()} is "
+        f"{age} day(s) behind today ({today.isoformat()}); "
+        f"warn>{warn_after_calendar_days}, abort>{abort_after_calendar_days}"
+    )
+    return FreshnessReport(
+        status=status, age_days=age, as_of_date=bundle.as_of_date, today=today,
+        warn_threshold=warn_after_calendar_days,
+        abort_threshold=abort_after_calendar_days,
+        message=msg,
+    )
+
+
 def _fetch_universe_symbols() -> tuple[list[str], list[str]]:
     """Return (stock_symbols, etf_symbols) from MEFDB."""
     conn = connect_mefdb()

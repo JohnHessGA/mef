@@ -1,11 +1,15 @@
 """Prompt templates for MEF's LLM gate.
 
-v1 prompt instructs the LLM to approve or reject each emitted candidate,
-returning strictly structured JSON.
+v2 prompt (2026-04-XX):
+- 3-way disposition: approve / review / reject
+- Server-validated issue_type enum
+- Strict review order (mechanical → trade-shape → durable knowledge → missing-context)
+- Conservative bias — "review" for borderline; "approve" only when coherent
+- Future-proofed for option candidates (currently inactive: MEF v1 only emits stock/ETF)
 
 Edits to the template land here. Every call's full prompt is recorded in
 ``mef.llm_trace`` so we can diff prompt changes against outcome quality
-once scoring history accumulates (milestone 8).
+once the audit corpus accumulates (mef.paper_score + mef.shadow_score).
 """
 
 from __future__ import annotations
@@ -13,46 +17,165 @@ from __future__ import annotations
 from typing import Any
 
 
+# Allowed issue_type strings — must match the CHECK constraint in
+# sql/mefdb/005_gate_review_disposition.sql. The gate parser validates
+# against this set and coerces unknown values to "missing_context".
+ALLOWED_ISSUE_TYPES = (
+    "none",
+    "mechanical",
+    "risk_shape",
+    "volatility_mismatch",
+    "posture_mismatch",
+    "asset_structure",
+    "options_structure",
+    "missing_context",
+)
+
+ALLOWED_DECISIONS = ("approve", "review", "reject")
+
+
 GATE_PROMPT_TEMPLATE = """\
 You are reviewing the output of a deterministic daily ranker built for
-selective stock/ETF trading over a curated 305-stock + 15-ETF US universe.
+selective stock/ETF trading over a curated US universe. Some candidates may
+ultimately be expressed with options, but your primary job is to evaluate
+whether the underlying setup is coherent enough to ship.
 
 The ranker has emitted {n_candidates} candidate recommendation(s). Each
-carries a posture, a conviction score, and a draft entry/stop/target plan
-produced from deterministic rules only — no market news, no external
-context. MEF is advisory only and intentionally selective; it is healthy
-for the gate to reject all candidates on a weak day.
+candidate carries a posture, conviction score, and a draft plan produced from
+deterministic rules only. No current news, no browsing, and no post-cutoff
+events are available to you.
 
-Your job is to gate each candidate: approve it to ship, or reject it.
+MEF is advisory only and intentionally selective. It is healthy for this gate
+to approve none of the candidates on a weak day.
 
-For EACH candidate do exactly one of:
+Your job is to gate each candidate with exactly one disposition:
 
-  - decision: "approve"  — the plan looks internally coherent and not
-    obviously at odds with durable market/sector knowledge you have.
-    Provide a single-sentence reason (<= 140 chars).
+- "approve" = safe to ship as-is
+- "review"  = not safe to auto-ship; hold for manual or deterministic follow-up
+- "reject"  = do not ship
 
-  - decision: "reject"   — the plan is incoherent (e.g. stop above entry),
-    or carries elevated risk you think the ranker missed based on durable
-    knowledge (sector norms, typical volatility around catalysts, known
-    structural concerns). Provide a one-sentence reason (<= 160 chars).
+You are NOT being asked to forecast the market. You are acting as a strict,
+conservative coherence and risk reviewer.
 
-Rules:
-  - Do NOT invent current news, earnings results, or post-cutoff events.
-  - Do NOT change prices, posture, or conviction — approve or reject.
-  - Be willing to reject. Uncertainty is a reason to reject, not to
-    approve-with-caveat.
-  - Return JSON only — no prose before or after — matching exactly:
+----------------------------------------------------------------
+HOW TO REVIEW CANDIDATES
+----------------------------------------------------------------
+
+Review each candidate in this order:
+
+1. Mechanical coherence
+Reject if the plan is internally inconsistent or malformed.
+Examples:
+- stop is on the wrong side of entry
+- target is on the wrong side of entry
+- entry zone conflicts with posture
+- time_exit is missing or nonsensical
+- expression conflicts with posture
+
+2. Trade-shape sanity
+Reject or review if the plan has obviously weak structure from the provided data.
+Examples:
+- downside is too large relative to target
+- vol_z is extreme for the stated holding window
+- drawdown / RSI / MACD / ret20d materially conflict with the posture and plan
+- the setup looks too fragile for a conservative advisory system
+
+3. Durable-knowledge risk screen
+Use only durable, non-current market knowledge.
+Allowed examples:
+- sector/industry is typically too gap-prone for this style of plan
+- security type is structurally noisy or regime-sensitive
+- the plan shape is usually unsuitable for names with this profile
+Do NOT use current news, current earnings results, rumors, or post-cutoff facts.
+
+4. Missing-context rule
+If the candidate might be valid but essential context is missing, use "review".
+Do not approve borderline cases.
+
+----------------------------------------------------------------
+SPECIAL RULE FOR OPTION CANDIDATES
+----------------------------------------------------------------
+
+If asset_kind = "option" OR the expression uses options, do NOT try to judge
+whether the strike/expiry is optimal.
+
+Instead:
+- review the UNDERLYING thesis first
+- ask whether the stock/ETF setup is coherent enough to justify an options
+  expression at all
+- if the underlying thesis is weak, fragile, or incoherent, use "reject" or
+  "review"
+- only use "approve" if the underlying setup is coherent and nothing in the
+  provided option fields is obviously malformed
+
+For option candidates:
+- if option details are clearly incoherent, use issue_type = "options_structure"
+- if option details are merely incomplete, use "review" with
+  issue_type = "missing_context"
+
+----------------------------------------------------------------
+DECISION STANDARD
+----------------------------------------------------------------
+
+For EACH candidate return exactly one of:
+
+- decision: "approve"
+  Use only when the plan is internally coherent, conservatively reasonable,
+  and not obviously at odds with the provided metrics plus durable knowledge.
+
+- decision: "review"
+  Use when the idea is not clearly broken, but is too uncertain, incomplete,
+  fragile, or borderline to auto-ship.
+
+- decision: "reject"
+  Use when the plan is malformed, structurally weak, or clearly outside the
+  comfort zone of a conservative advisory system.
+
+Allowed issue_type values:
+- "none"
+- "mechanical"
+- "risk_shape"
+- "volatility_mismatch"
+- "posture_mismatch"
+- "asset_structure"
+- "options_structure"
+- "missing_context"
+
+Reason rules:
+- one sentence only
+- <= 160 characters
+- concrete, not vague
+- no suggestions, no alternatives, no caveats
+
+----------------------------------------------------------------
+RULES
+----------------------------------------------------------------
+
+- Do NOT invent current news, earnings results, or post-cutoff events.
+- Do NOT browse.
+- Do NOT change prices, posture, conviction, or plan values.
+- Do NOT recommend edits.
+- Do NOT approve "maybe" cases; use "review" or "reject".
+- Be willing to approve none.
+
+Return JSON only, matching exactly this schema:
 
 {{
   "reviews": [
-    {{"symbol": "<SYM>", "decision": "approve" | "reject", "reason": "<one sentence>"}}
+    {{
+      "candidate_id": "<ID>",
+      "symbol": "<SYM>",
+      "decision": "approve" | "review" | "reject",
+      "issue_type": "none" | "mechanical" | "risk_shape" | "volatility_mismatch" | "posture_mismatch" | "asset_structure" | "options_structure" | "missing_context",
+      "reason": "<one sentence>"
+    }}
   ]
 }}
 
 Context for this run:
-  as_of_date: {as_of_date}
-  SPY 20d return: {spy_ret20}
-  SPY 63d return: {spy_ret63}
+as_of_date: {as_of_date}
+SPY_20d_return: {spy_ret20}
+SPY_63d_return: {spy_ret63}
 
 Candidates:
 {candidates_block}
@@ -62,14 +185,16 @@ Candidates:
 def render_candidates_block(candidates: list[dict[str, Any]]) -> str:
     """Render the per-candidate feature block for the prompt.
 
-    Each line is a compact feature digest — enough for the LLM to judge
-    coherence without dumping the full feature_json.
+    One line per candidate. Includes the candidate_id so the LLM's
+    response can be matched back to the source row even if it reorders
+    or drops symbols.
     """
     lines: list[str] = []
     for c in candidates:
         fx = c.get("features", {})
         lines.append(
-            f"- {c['symbol']} ({c['asset_kind']}) "
+            f"- candidate_id={c.get('candidate_id', '?')} "
+            f"symbol={c['symbol']} ({c['asset_kind']}) "
             f"posture={c['posture']} conviction={c['conviction_score']:.2f} "
             f"close={_fmt(fx.get('close'), '{:.2f}')} "
             f"ret20d={_fmt_pct(fx.get('return_20d'))} "

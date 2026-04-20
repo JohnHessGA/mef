@@ -104,6 +104,43 @@ def _add_rejections(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(func=_run_rejections)
 
 
+def _add_gate_audit(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "gate-audit",
+        help="Compare approved vs rejected outcome distributions to test if the LLM gate helps.",
+    )
+    p.set_defaults(func=_run_gate_audit)
+
+
+def _add_tag(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "tag",
+        help="Override the inferred activation provenance on a recommendation.",
+    )
+    p.add_argument("rec_uid", help="Recommendation UID (e.g., R-000042).")
+    p.add_argument(
+        "--provenance",
+        required=True,
+        choices=["mef_attributed", "pre_existing", "independent"],
+        help="What actually drove the position match.",
+    )
+    p.set_defaults(func=_run_tag)
+
+
+def _add_link_trade(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "link-trade",
+        help="Record the actual buy/sell on a scored recommendation.",
+    )
+    p.add_argument("rec_uid", help="Recommendation UID (e.g., R-000042).")
+    p.add_argument("--qty",         required=True, type=float, help="Shares traded.")
+    p.add_argument("--buy-price",   required=True, type=float, help="Actual buy fill price.")
+    p.add_argument("--buy-date",    required=True, help="Buy date (YYYY-MM-DD).")
+    p.add_argument("--sell-price",  type=float, help="Actual sell fill price (optional while holding).")
+    p.add_argument("--sell-date",   help="Sell date (YYYY-MM-DD; optional while holding).")
+    p.set_defaults(func=_run_link_trade)
+
+
 def _add_report(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser("report", help="Render the email report for a given run without sending.")
     p.add_argument(
@@ -175,6 +212,21 @@ def _run_rejections(args) -> int:
     return rejections.run(args)
 
 
+def _run_gate_audit(args) -> int:
+    from mef.commands import gate_audit
+    return gate_audit.run(args)
+
+
+def _run_tag(args) -> int:
+    from mef.commands import tag
+    return tag.run(args)
+
+
+def _run_link_trade(args) -> int:
+    from mef.commands import link_trade
+    return link_trade.run(args)
+
+
 # ───────────────────────────── parser wiring ─────────────────────────────
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -193,6 +245,9 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_import_positions(sub)
     _add_score(sub)
     _add_rejections(sub)
+    _add_gate_audit(sub)
+    _add_tag(sub)
+    _add_link_trade(sub)
     _add_report(sub)
     return parser
 
