@@ -150,7 +150,7 @@ def _add_report(sub: argparse._SubParsersAction) -> None:
         help="Which report to render.",
     )
     p.add_argument("--run", help="Specific run UID (defaults to latest matching --when).")
-    p.set_defaults(func=_stub("report"))
+    p.set_defaults(func=_run_report)
 
 
 # ───────────────────────────── dispatchers ─────────────────────────────
@@ -225,6 +225,11 @@ def _run_tag(args) -> int:
 def _run_link_trade(args) -> int:
     from mef.commands import link_trade
     return link_trade.run(args)
+
+
+def _run_report(args) -> int:
+    from mef.commands import report
+    return report.run(args)
 
 
 # ───────────────────────────── parser wiring ─────────────────────────────
