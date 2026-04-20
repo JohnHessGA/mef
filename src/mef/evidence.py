@@ -118,32 +118,54 @@ def _fetch_universe_symbols() -> tuple[list[str], list[str]]:
     return stocks, etfs
 
 
+# Latest-bar-per-symbol via CTE. The more obvious
+# ``DISTINCT ON (symbol) … WHERE symbol = ANY(%s) ORDER BY symbol,
+# bar_date DESC`` pattern silently returns stale rows when the universe
+# array is large against the TimescaleDB-chunked mart tables — the
+# planner's Merge Append truncates per-chunk before the DISTINCT picks,
+# so the "latest" becomes an older bar. The CTE forces MAX(bar_date)
+# per symbol first, then joins back.
+
 _EQUITY_SQL = """
-SELECT DISTINCT ON (symbol)
-    symbol, bar_date, sector, close,
-    return_20d, return_63d,
-    sma_20, sma_50, sma_200,
-    rsi_14, macd_histogram,
-    realized_vol_20d,
-    drawdown_current,
-    volume_z_score
-FROM mart.stock_equity_daily
-WHERE symbol = ANY(%s)
-ORDER BY symbol, bar_date DESC
+WITH latest AS (
+    SELECT symbol, MAX(bar_date) AS bar_date
+      FROM mart.stock_equity_daily
+     WHERE symbol = ANY(%s)
+     GROUP BY symbol
+)
+SELECT sed.symbol, sed.bar_date, sed.sector, sed.close,
+       sed.return_20d, sed.return_63d,
+       sed.sma_20, sed.sma_50, sed.sma_200,
+       sed.rsi_14, sed.macd_histogram,
+       sed.realized_vol_20d,
+       sed.drawdown_current,
+       sed.volume_z_score,
+       sed.atr_14
+  FROM mart.stock_equity_daily sed
+  JOIN latest l
+    ON l.symbol = sed.symbol
+   AND l.bar_date = sed.bar_date
 """
 
 _ETF_SQL = """
-SELECT DISTINCT ON (symbol)
-    symbol, bar_date, close,
-    return_20d, return_63d,
-    sma_20, sma_50, sma_200,
-    rsi_14, macd_histogram,
-    realized_vol_20d,
-    drawdown_current,
-    volume_z_score
-FROM mart.stock_etf_daily
-WHERE symbol = ANY(%s)
-ORDER BY symbol, bar_date DESC
+WITH latest AS (
+    SELECT symbol, MAX(bar_date) AS bar_date
+      FROM mart.stock_etf_daily
+     WHERE symbol = ANY(%s)
+     GROUP BY symbol
+)
+SELECT sed.symbol, sed.bar_date, sed.close,
+       sed.return_20d, sed.return_63d,
+       sed.sma_20, sed.sma_50, sed.sma_200,
+       sed.rsi_14, sed.macd_histogram,
+       sed.realized_vol_20d,
+       sed.drawdown_current,
+       sed.volume_z_score,
+       sed.atr_14
+  FROM mart.stock_etf_daily sed
+  JOIN latest l
+    ON l.symbol = sed.symbol
+   AND l.bar_date = sed.bar_date
 """
 
 
