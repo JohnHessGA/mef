@@ -95,12 +95,29 @@ def _score_symbol(symbol: str, row: dict[str, Any], baseline: dict[str, Any]) ->
         if macd_hist is not None and macd_hist > 0:
             base += 0.05
             notes.append("MACD histogram positive")
-        if return_20d is not None and return_20d > 0.02:
-            base += 0.05
-            notes.append(f"20d return {return_20d:.1%}")
+        # Tiered 20d-return: reward modest advances (pre-breakout / early),
+        # neutral in the middle, penalize already-extended bounces.
+        if return_20d is not None:
+            if 0.02 <= return_20d <= 0.08:
+                base += 0.05
+                notes.append(f"20d return {return_20d:.1%} (modest, constructive)")
+            elif return_20d > 0.15:
+                base -= 0.10
+                notes.append(f"20d return {return_20d:.1%} extended → bounce penalty")
         if vol_z is not None and vol_z > 0.5:
             base += 0.03
             notes.append(f"volume z-score {vol_z:+.2f}")
+        # Extension from SMA50: prefer names near or just-reclaiming SMA50
+        # (coiled setups) over names already well above it (bounce done).
+        sma50 = row.get("sma_50")
+        if sma50 and sma50 > 0:
+            ext50 = (close / sma50) - 1.0
+            if 0.0 <= ext50 <= 0.03:
+                base += 0.05
+                notes.append(f"close {ext50:+.1%} from SMA50 → coiled setup")
+            elif ext50 > 0.08:
+                base -= 0.08
+                notes.append(f"close {ext50:+.1%} above SMA50 → extended penalty")
         # SPY-relative nudge
         spy20 = baseline.get("spy_return_20d")
         if posture == POSTURE_BULLISH and spy20 is not None and return_20d is not None:
