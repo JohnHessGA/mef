@@ -106,6 +106,36 @@ def test_select_for_emission_applies_threshold_and_cap():
     assert len(survivors_capped) == 1
 
 
+def test_needs_pullback_anchors_entry_below_close():
+    # drawdown_current ≈ 0 → stock is at its recent peak; the draft plan
+    # must anchor the entry zone to a pullback target (sma_20 or below),
+    # not the current close.
+    at_peak = _row(
+        symbol="P", close=100.0, sma_20=92.0, sma_50=88.0,
+        drawdown_current=0.0, atr_14=2.0,
+    )
+    cand = rank(_bundle({"P": at_peak}))[0]
+    assert cand.needs_pullback is True
+    # Entry high should be meaningfully below close (at least 2% below).
+    # Parse the "$low-$high" zone string for the upper bound.
+    high_str = cand.proposed_entry_zone.split("-$")[1]
+    entry_high = float(high_str)
+    assert entry_high <= 98.0, f"entry_high {entry_high} should be ≤98.0"
+    # Stop should still be below entry, target above close.
+    assert cand.proposed_stop < entry_high
+    assert cand.proposed_target > 100.0
+
+    # Control: the same row with a real pullback (dd = -5%) does NOT flag.
+    pulled_back = _row(
+        symbol="Q", close=100.0, sma_20=92.0, sma_50=88.0,
+        drawdown_current=-0.05, atr_14=2.0,
+    )
+    ctrl = rank(_bundle({"Q": pulled_back}))[0]
+    assert ctrl.needs_pullback is False
+    ctrl_high = float(ctrl.proposed_entry_zone.split("-$")[1])
+    assert ctrl_high >= 99.0, f"control entry_high {ctrl_high} should be close to 100"
+
+
 def test_spy_relative_boost_vs_penalty():
     better_than_spy = rank(_bundle({"S": _row(symbol="S", return_20d=0.08)}, spy_ret20=0.01))
     worse_than_spy = rank(_bundle({"S": _row(symbol="S", return_20d=-0.05)}, spy_ret20=0.04))

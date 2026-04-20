@@ -48,6 +48,11 @@ class RankedCandidate:
     proposed_target: float | None = None
     proposed_time_exit: date | None = None
 
+    # True when the symbol is at or very near its recent peak (drawdown
+    # ≈ 0): posture/conviction are unchanged, but _draft_plan anchors the
+    # entry zone to a pullback target instead of "buy here".
+    needs_pullback: bool = False
+
     # Emission helpers
     emitted: bool = False
     reasoning_notes: list[str] = field(default_factory=list)
@@ -152,28 +157,56 @@ def _score_symbol(symbol: str, row: dict[str, Any], baseline: dict[str, Any]) ->
     if conviction < 0.40:
         posture = POSTURE_NO_EDGE
 
+    # At/near recent peak → patient entry only, regardless of conviction.
+    # Threshold is symmetric with the SMA50 extension check above.
+    needs_pullback = drawdown is not None and drawdown > -0.03
+    if needs_pullback:
+        notes.append(f"at recent peak (dd {drawdown:+.1%}) → wait for pullback")
+
     return RankedCandidate(
         symbol=symbol,
         asset_kind=row.get("asset_kind", "stock"),
         posture=posture,
         conviction_score=round(conviction, 4),
         features=row,
+        needs_pullback=needs_pullback,
         reasoning_notes=notes,
     )
 
 
 def _draft_plan(cand: RankedCandidate) -> RankedCandidate:
-    """Attach a draft expression + entry/stop/target for emittable postures."""
+    """Attach a draft expression + entry/stop/target for emittable postures.
+
+    When ``cand.needs_pullback`` is set, the entry zone is anchored to a
+    realistic pullback target (higher of SMA20 or close − 2·ATR14, capped
+    at ≥2% below close) instead of "buy at/near the current print". The
+    emitted zone becomes a resting-limit price: it fills on a dip or
+    doesn't fill at all, which is the actionable answer when the stock
+    just tagged a fresh high.
+    """
     close = cand.features.get("close")
     if close is None or cand.posture in (POSTURE_NO_EDGE, POSTURE_BEARISH_CAUTION):
         return cand
 
     if cand.posture == POSTURE_BULLISH:
         expression = EXPRESSION_BUY_ETF if cand.asset_kind == "etf" else EXPRESSION_BUY_SHARES
-        entry_low = round(close * 0.98, 2)
-        entry_high = round(close * 1.00, 2)
-        stop = round(close * 0.93, 2)
-        target = round(close * 1.08, 2)
+        if cand.needs_pullback:
+            sma20 = cand.features.get("sma_20") or 0.0
+            atr14 = cand.features.get("atr_14") or 0.0
+            # Best realistic pullback target: higher of SMA20 / (close − 2·ATR) /
+            # a 7% floor. Cap it at 2% below close so the zone is meaningfully
+            # lower than the current print — otherwise the "wait" signal is moot.
+            anchor = max(sma20, close - 2.0 * atr14, close * 0.93)
+            anchor = min(anchor, close * 0.98)
+            entry_low = round(anchor * 0.99, 2)
+            entry_high = round(anchor * 1.01, 2)
+            stop = round(entry_low * 0.94, 2)
+            target = round(close * 1.06, 2)
+        else:
+            entry_low = round(close * 0.98, 2)
+            entry_high = round(close * 1.00, 2)
+            stop = round(close * 0.93, 2)
+            target = round(close * 1.08, 2)
     else:  # range_bound
         expression = EXPRESSION_CASH_SECURED_PUT if cand.asset_kind == "stock" else EXPRESSION_COVERED_CALL
         entry_low = round(close * 0.96, 2)
@@ -195,6 +228,7 @@ def _draft_plan(cand: RankedCandidate) -> RankedCandidate:
         proposed_stop=stop,
         proposed_target=target,
         proposed_time_exit=time_exit,
+        needs_pullback=cand.needs_pullback,
         reasoning_notes=cand.reasoning_notes,
     )
 

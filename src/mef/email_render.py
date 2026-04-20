@@ -49,7 +49,12 @@ def _idea_lines(idx: int, idea: dict[str, Any]) -> list[str]:
 
     entry_zone = idea.get("entry_zone")
     if entry_zone:
-        lines.append(f"     Entry zone: {entry_zone}")
+        if idea.get("needs_pullback"):
+            current = idea.get("current_price")
+            price_hint = f" (currently ~${current:,.2f})" if current is not None else ""
+            lines.append(f"     Entry zone: {entry_zone}  ⏳ wait for pullback{price_hint}")
+        else:
+            lines.append(f"     Entry zone: {entry_zone}")
     stop = idea.get("stop")
     target = idea.get("target")
     time_exit = idea.get("time_exit")

@@ -311,6 +311,8 @@ def _insert_recommendations(
                 "issue_type":        decision.issue_type,
                 "should_email":      should_email,
                 "reasoning_summary": reasoning,
+                "needs_pullback":    cand.needs_pullback,
+                "current_price":     cand.features.get("close"),
                 **pnl,
             })
     conn.commit()
