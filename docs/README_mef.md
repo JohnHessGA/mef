@@ -1,9 +1,22 @@
 # MEF — Muse Engine Forecaster
 
-Version: 2026-04-19
-Status: Initial build specification
+Version: 2026-04-20
+Status: Built and running daily — see `mef_build_order.md` for milestone status
 Database: MEFDB — Muse Engine Forecaster Database
 Repo/tool name: `mef`
+
+---
+
+## Companion docs
+
+This file is the high-level build spec — what MEF is, why it exists, and the v1 scope. Most readers want one of:
+
+- **[`mef_operations.md`](mef_operations.md)** — how to use MEF day-to-day (the email, the CLI, the audit cadence). Start here if you're operating the tool.
+- **[`mef_design_spec.md`](mef_design_spec.md)** — architectural design, full schema, pipeline internals.
+- **[`mef_build_order.md`](mef_build_order.md)** — living milestone tracker; current state of every feature.
+- **[`mef_llm_gate.md`](mef_llm_gate.md)** — LLM gate philosophy, 3-way disposition vocabulary, prompt iteration guide.
+- **[`mef_audit_model.md`](mef_audit_model.md)** — the four scoring tables (real / shadow / paper / daily-pnl) and which question each answers.
+- **[`mef_cron.md`](mef_cron.md)** — cron install steps.
 
 ---
 
@@ -65,13 +78,20 @@ The tool is built to ship fast, run every day, and improve from its own scoring 
 - Directional posture per candidate: `bullish` / `bearish_caution` / `range_bound` / `no_edge`
 - Trade expressions (v1): buy shares, buy ETF shares, covered call, cash-secured put, reduce / exit / hedge (existing positions), hold cash
 - Per-recommendation plan: directional posture, expression, entry method, exit / invalidation, target holding window, confidence, short reasoning
-- LLM final-review pass (Claude CLI) over the deterministic ranker's top candidates
+- LLM final-review pass (Claude CLI) over the deterministic ranker's top candidates with a **3-way disposition** (`approve` / `review` / `reject`) and a server-validated `issue_type` taxonomy — see `mef_llm_gate.md`
 - **Active-position tracking:**
   - Infer user's actual holdings from daily Fidelity Positions CSV ingest (same pattern as IRA Guard)
   - Track every MEF recommendation through its lifecycle (see §"Recommendation Lifecycle")
-- **Two daily emails** (via MDC's `notify.py --source MEF`) containing current status and recommendations — no other notifications
-- CLI for operator use (run, status, list recommendations, mark dismissed, inspect, score)
-- Scoring: win / loss / timeout per closed recommendation, with estimated $ P&L for 100 shares
+  - **Activation provenance** stamped at promote time (`mef_attributed` / `pre_existing` / `independent`) so future audits don't conflate ambient trades with MEF-driven ones
+- **Two daily emails** sent via direct SMTP (`smtplib` reading SMTP credentials from MDC's `notifications.yaml`) — **not** via MDC's `notify.py`, which forces its own subject/body wrapper that would mangle MEF's report. Email shows only LLM-approved (and unavailable-fallback) ideas; review-tagged and rejected ideas live in MEFDB and are visible via the CLI.
+- **Data-freshness gate** — pipeline checks the latest mart bar age before ranking; warns above one threshold, aborts above another so MEF never ranks against silently-stale UDC data
+- CLI for operator use: run, status, list/show/dismiss/tag recommendations, link real trades, gate-audit, rejections, score, init-db, universe — see `mef_operations.md` for the full quick reference
+- **Four-table scoring corpus** (see `mef_audit_model.md`):
+  - `mef.score` — real outcomes from trades you actually made (with optional realized P&L overlay via `mef link-trade`)
+  - `mef.shadow_score` — forward-walked outcomes for every LLM-rejected candidate (makes the gate falsifiable)
+  - `mef.paper_score` — forward-walked outcomes for every emitted rec (collapses validation horizon from months to weeks)
+  - `mef.recommendation_pnl_daily` — day-by-day MTM curve for every active rec, with a clean close-day endpoint
+- `mef gate-audit` command — side-by-side comparison of approve / review / reject / unavailable outcome distributions, with sample-size discipline
 - Persistence of everything in MEFDB
 
 ### Explicitly out of scope (v1)
@@ -119,19 +139,24 @@ Both emails are sent every trading day, whether or not there are new ideas. "No 
 
 ### CLI
 
-Minimal surface (detail in `docs/mef_cli.md`, to be written alongside initial implementation):
+Full quick reference + day-to-day usage lives in **`mef_operations.md`**. Highlights:
 
 | Command | Purpose |
 |---|---|
-| `mef run --when {premarket\|postmarket}` | Execute one scheduled run (entry point for cron) |
-| `mef status` | Environment, data freshness, last run, active recs, tracked positions |
-| `mef recommendations [--active\|--all\|--since <date>]` | List recommendations with lifecycle state |
-| `mef show <rec-id>` | Full detail on a recommendation (evidence, plan, history) |
-| `mef dismiss <rec-id>` | Mark a proposed recommendation as not-implemented |
+| `mef run --when {premarket\|postmarket} [--dry-run]` | Execute one scheduled run (entry point for cron); `--dry-run` skips email send |
+| `mef status` | Environment, data freshness, last run, DB connectivity |
+| `mef recommendations [--state X\|--all\|--symbol\|--since <date>]` | List recommendations with lifecycle state |
+| `mef show <rec-uid>` | Full detail (gate decision, issue_type, paper-score outcome, P&L curve, provenance) |
+| `mef dismiss <rec-uid> [--note]` | Mark a proposed recommendation as not-implemented |
+| `mef tag <rec-uid> --provenance ...` | Override inferred activation provenance |
+| `mef link-trade <rec-uid> --qty --buy-price --buy-date [--sell-...]` | Record actual buy/sell on a scored rec |
+| `mef rejections [--symbol\|--since\|--limit]` | Audit table of LLM-rejected candidates with reason + issue_type |
+| `mef gate-audit` | Side-by-side outcome distribution of approve / review / reject / unavailable |
+| `mef score` | Re-evaluate closed recs and refresh paper + shadow scoring |
 | `mef import-positions <csv>` | Ingest a Fidelity Portfolio Positions CSV |
-| `mef score` | Re-evaluate closed recommendations and update scoring |
-| `mef universe` | Show current stock + ETF universe (and filter criteria) |
-| `mef report --when {premarket\|postmarket}` | Regenerate and preview the email report without sending |
+| `mef universe [load]` | Show or reload the 305+15 universe |
+| `mef report --when {premarket\|postmarket} [--run UID]` | Regenerate the email body for a run from existing DB state, no SMTP |
+| `mef init-db` | Apply MEFDB + Overwatch migrations (idempotent) |
 
 ---
 
@@ -171,21 +196,30 @@ A full SHDB-table → evidence-family map lives in `docs/mef_design_spec.md`. If
 Each run executes the same pipeline; only the intent (today-after-10 vs. next-trading-day) and input freshness differ.
 
 ```
-1. Load universe (305 + 15 from MEFDB)
-2. Pull evidence from SHDB for the full universe
-3. Compute per-symbol features and a directional posture
-4. Deterministic ranker produces candidate list with draft entry/exit plans
-5. LLM final review (Claude CLI) — sanity-check top candidates, add color,
-   flag any that don't make sense
-6. Finalize new-ideas list (may be empty → "no new trades today")
-7. Re-evaluate every active recommendation and tracked position
-   (thesis status, exit / invalidation checks, lifecycle transitions)
-8. Persist: daily_run, candidates, recommendations, updates, llm_trace
-9. Generate and send the email (notify.py --source MEF)
-10. Write telemetry to ow.mef_run / ow.mef_event
+ 1. Open mef.daily_run (status=running) + ow.mef_run telemetry row
+ 2. Lifecycle sweep — expire/auto-close any recs that aged out or
+    disappeared from the latest position snapshot
+ 3. Load universe (305 + 15 from MEFDB)
+ 4. Pull evidence from SHDB for the full universe
+ 5. Data-freshness gate — abort run if the latest mart bar is too stale
+ 6. Deterministic ranker produces candidates with posture + conviction
+    + draft entry/stop/target plans
+ 7. Select top-N (conviction_threshold + max_new_ideas_per_run cap)
+ 8. LLM gate (Claude CLI) — 3-way disposition (approve/review/reject)
+    + issue_type per candidate. See mef_llm_gate.md
+ 9. Insert mef.recommendation rows for approve + review + unavailable
+    (reject stays on mef.candidate only)
+10. Daily P&L snapshot — one mef.recommendation_pnl_daily row per
+    active rec, plus close-day rows for newly-closed recs
+11. Score newly-closed recs (mef.score), shadow-score rejects
+    (mef.shadow_score), paper-score every emitted rec (mef.paper_score)
+12. Render and send the email (direct SMTP — see Output below).
+    Email shows only LLM-approved + unavailable ideas; review-tagged
+    and rejected ideas live in MEFDB and surface via the CLI.
+13. Close mef.daily_run (status=ok) + complete ow.mef_run with counts
 ```
 
-Step 7 is important: the daily re-evaluation is not separate from idea generation — it's part of every run.
+The lifecycle sweep + audit/scoring loops run on every scheduled run, not separately — daily re-evaluation is part of every cron firing.
 
 ---
 
@@ -231,7 +265,19 @@ When a recommendation closes, MEF computes:
 - **days_held:** calendar days from `active` (or `proposed` fill date when inferred) to close
 - **benchmark_return_same_window:** SPY and the relevant sector ETF over the same calendar window, for context
 
-Later, once IRA Guard/PHDB data is integrated, MEF can replace the 100-share estimate with the user's **actual** realized dollar change. That's a v2 concern.
+For real per-account P&L, run **`mef link-trade <rec-uid> --qty --buy-price --buy-date [--sell-price --sell-date]`** to overlay your actual fills on the score row. That populates `realized_pnl_usd` and the headline `realized_pnl_per_day` metric (the "max profit in shortest time" answer). Until PHDB has Fidelity transaction history wired up for automatic linking, this is the manual bridge.
+
+The full audit data model — `mef.score`, `mef.shadow_score`, `mef.paper_score`, `mef.recommendation_pnl_daily` — is documented in **`mef_audit_model.md`**.
+
+### Activation provenance
+
+When MEF flips a `proposed` rec to `active` because a matching position appeared in your CSV, it stamps **how** that match happened:
+
+- `mef_attributed` — symbol wasn't in your positions before this rec; appeared during the entry window
+- `pre_existing` — symbol was already in your positions before MEF proposed it
+- `independent` — position appeared after the entry window, or otherwise out-of-band
+
+The activator infers this from the symbol's earliest position-snapshot date. `mef tag <rec-uid> --provenance ...` overrides when the inference is wrong. This lets future audits report MEF-attributed outcomes separately from ambient ones the user would have made anyway.
 
 ---
 
@@ -239,31 +285,39 @@ Later, once IRA Guard/PHDB data is integrated, MEF can replace the 100-share est
 
 MEF uses **Claude CLI (`claude -p`)** for the final-review step. The integration is built so **another LLM can be substituted later** (pluggable provider in the config).
 
-What the LLM does:
+The LLM is a **gate**, not an idea generator. It returns a 3-way disposition per candidate:
 
-- Reviews the deterministic ranker's top candidates and any active-position changes
-- Adds context and color (market backdrop, recent news relevance, conflict between signals, caveats)
-- Flags candidates whose plan doesn't make sense given the LLM's broader knowledge
-- Produces the short reasoning summary for each idea that appears in the email
+- `approve` — safe to ship as-is. Becomes a recommendation, appears in the email.
+- `review` — not safe to auto-ship. Becomes a recommendation, **withheld from email**, visible via `mef recommendations --state proposed`.
+- `reject` — not shipped. Audit trail on `mef.candidate.llm_gate_decision/reason/issue_type`.
+
+Each disposition carries an `issue_type` from a small enum (`mechanical`, `risk_shape`, `volatility_mismatch`, `posture_mismatch`, `asset_structure`, `options_structure`, `missing_context`, `none`) that's server-validated against a SQL CHECK constraint.
 
 What the LLM does **not** do:
 
 - Generate candidates from scratch (the ranker does that)
 - Decide whether "no new trades today" is the right answer (the ranker's thresholds decide that)
 - Modify entry/exit prices (deterministic plan wins)
+- Browse, claim current news, or invent post-cutoff events
 
-Every LLM call is logged to `mef.llm_trace` with prompt, response, model, elapsed time, and linkage to the owning `daily_run` and candidate. The prompt itself will be iterated on; v1 ships with a plain-English prompt asking the LLM, *"Given these candidates and this supporting evidence, do our assumptions and plans make sense? Flag anything that looks wrong, add context a thoughtful analyst would add."*
+Every LLM call is logged to `mef.llm_trace` with prompt, response, model, elapsed time, and linkage to the owning `daily_run` and candidate. The prompt design philosophy, prompt source, and iteration guide live in **`mef_llm_gate.md`**.
+
+If the LLM call fails, MEF ships the ideas anyway tagged `unavailable` ("Not reviewed by LLM") so an Anthropic outage doesn't silence the daily email.
 
 ---
 
 ## Output
 
-**Two emails per trading day** (pre-market and post-market), sent via MDC's `notify.py --source MEF`. Both emails always send — there is no "quiet when nothing changes" behavior. A weak-evidence day produces a short email that says so. Aside from these two scheduled emails, MEF sends **no other notifications** — no SMS, no per-event alerts, no failure pages. Operational failures surface via Overwatch and cron logs.
+**Two emails per trading day** (pre-market and post-market), sent via **direct SMTP** (`smtplib` reading SMTP credentials from MDC's `notifications.yaml`). MEF deliberately does **not** route through MDC's `notify.py`, which forces its own subject/body wrapper that would mangle the report. Both emails always send — there is no "quiet when nothing changes" behavior. A weak-evidence day produces a short email that says so. Aside from these two scheduled emails, MEF sends **no other notifications** — no SMS, no per-event alerts, no failure pages. Operational failures surface via Overwatch and cron logs.
+
+The email shows only LLM-approved (and unavailable-fallback) ideas; review-tagged and rejected ideas live in MEFDB and are visible via `mef recommendations --state proposed` and `mef rejections`.
 
 Email body sections:
 
 - Header: run timestamp, intent (today-after-10 / next-trading-day), universe health
-- **New ideas** (or "No new trades today")
+- Optional staleness banner (`⚠` warn / `⛔` abort) when the data-freshness gate trips
+- **New ideas** (or "No new trades today") — each with R:R block per 100 shares + reasoning
+- One-line footer noting how many additional ideas were held for review or rejected
 - **Active recommendations & tracked positions** — status, guidance, revised levels
 - Footer: scoring summary (recent closes), links to CLI commands for detail
 
@@ -306,48 +360,38 @@ New PostgreSQL database on the shared `localhost:5432` instance, following AFT c
 - **Schema:** `mef`
 - **Owner:** `mef_user` (credentials stored in `config/postgres.yaml`, gitignored, following MDC/UDC/RSE/IRA Guard pattern)
 
-Conceptual v1 tables (full column-level schema in `docs/mef_design_spec.md` §"MEFDB Schema"):
+Tables (full column-level schema in `docs/mef_design_spec.md` §"MEFDB Schema"; audit-table relationships in `mef_audit_model.md`):
 
 | Table | Purpose |
 |---|---|
 | `mef.universe_stock` | The 305 stocks currently in universe |
 | `mef.universe_etf` | The 15 ETFs currently in universe |
 | `mef.daily_run` | One row per scheduled run (intent, status, timings) |
-| `mef.candidate` | Per-run, per-symbol features + directional posture + score |
-| `mef.recommendation` | Emitted recommendations with entry/exit plans and lifecycle state |
+| `mef.candidate` | Per-run, per-symbol features + posture + LLM gate decision/issue_type/reason |
+| `mef.recommendation` | Emitted recommendations with entry/exit plans, lifecycle state, provenance |
 | `mef.recommendation_update` | Per-run updates to active recommendations (thesis-status transitions, revised levels) |
 | `mef.position_snapshot` | User's holdings imported from Fidelity CSV |
 | `mef.import_batch` | One row per CSV import |
 | `mef.benchmark_snapshot` | Cached SPY / sector-ETF values used in scoring (joined from SHDB) |
-| `mef.score` | Closed-recommendation outcomes and estimated P&L |
+| `mef.score` | Closed-recommendation outcomes — synthetic estimate + optional realized-trade overlay |
+| `mef.shadow_score` | Forward-walked outcomes for every LLM-rejected candidate (gate falsifiability) |
+| `mef.paper_score` | Forward-walked outcomes for every emitted rec (validation horizon collapse) |
+| `mef.recommendation_pnl_daily` | Day-by-day MTM P&L curve over the holding period |
 | `mef.llm_trace` | Every LLM call: prompt, response, model, timing, linkage |
 | `mef.command_log` | CLI invocations for auditability |
 
 Overwatch telemetry (in the existing `overwatch` database):
 
-- `ow.mef_run` — one row per completed/failed run
-- `ow.mef_event` — discrete events (info / warning / error)
+- `ow.mef_run` — one row per completed/failed run with full counts (gate disposition, scoring, paper/shadow, P&L snapshot, email status)
+- `ow.mef_event` — discrete events (info / warning / error), including data-staleness, gate-unavailable, lifecycle sweeps, paper/shadow scoring activity
 
-UID prefixes (to be confirmed during implementation): `DR-` daily_run, `C-` candidate, `R-` recommendation, `I-` import_batch, `P-` position_snapshot, `S-` score, `L-` llm_trace.
+UID prefixes: `DR-` daily_run, `C-` candidate, `R-` recommendation, `U-` recommendation_update, `I-` import_batch, `P-` position_snapshot, `S-` score, `SS-` shadow_score, `PS-` paper_score, `L-` llm_trace.
 
 ---
 
 ## Build Order
 
-Sequenced so the daily loop is runnable as early as possible; depth follows shape.
-
-- **Repo & database setup** — `~/repos/mef/` skeleton (Python 3.12, src layout, `pyproject.toml`, venv, config), MEFDB + `mef_user`, minimal schema migration, `mef status` command
-- **Universe load** — `mef universe load` syncs `universe_stock` / `universe_etf` from the notes files; `mef universe` shows current state
-- **Skeleton daily run** — `mef run --when {premarket|postmarket}` executes end-to-end with a dummy ranker that always emits "no new trades today," writes a `daily_run` row, and sends the email. Establishes cron, telemetry, email plumbing before real scoring.
-- **Evidence & ranker v0** — simple deterministic ranker using a small evidence set (trend + momentum + volatility + SPY-relative) producing ranked candidates with draft plans
-- **LLM review** — Claude CLI integration, `llm_trace` logging, prompt template, review pass over top candidates
-- **Position tracking** — `mef import-positions`, `position_snapshot`, `import_batch`, inference of `active` recommendations from holdings
-- **Recommendation lifecycle** — `mef dismiss`, auto-expiration, auto-close detection, `mef show`, `mef recommendations`
-- **Scoring** — `mef score`, `score` table, benchmark comparisons
-- **Email polish** — real two-section email body with new ideas + active-position updates
-- **Iterate** — evidence families, ranker weights, LLM prompt, email formatting
-
-The list continues past this milestone; items above are the path to a **working, usable-for-testing daily loop**.
+The canonical, living tracker is **`mef_build_order.md`** — that file shows current status of every milestone (✅ done / ⏳ next / 🅿 parked). As of 2026-04-20, milestones 1-15 are done (full daily loop, validation infrastructure, 3-way LLM gate, provenance, daily P&L tracking, report+show polish); milestone 16 (iteration: prompt tuning, evidence-weight tuning, Grafana dashboards) is next; milestone 17 (universe management) is parked until ~3 months of scoring data exist.
 
 ---
 
