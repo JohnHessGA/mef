@@ -164,6 +164,43 @@ def _score_symbol(symbol: str, row: dict[str, Any], baseline: dict[str, Any]) ->
         base = 0.40
         notes.append("trend mixed (one SMA above, one below)")
 
+    # Multi-timeframe consensus — applies to emittable postures only.
+    # Framed as "count strong disagreements with bullish posture" rather
+    # than "count alignments", so normal V-recovery negativity (SPY itself
+    # sat ~-3% on 126d in late March) does NOT rack up disagreements.
+    # Only genuinely damaged stocks do.
+    if posture in (POSTURE_BULLISH, POSTURE_RANGE_BOUND):
+        return_5d = row.get("return_5d")
+        return_126d = row.get("return_126d")
+        return_252d = row.get("return_252d")
+        disagreements = 0
+        if return_20d is not None and return_20d < -0.05:
+            disagreements += 1
+        if row.get("return_63d") is not None and row["return_63d"] < -0.10:
+            disagreements += 1
+        if return_126d is not None and return_126d < -0.15:
+            disagreements += 1
+        if return_252d is not None and return_252d < -0.25:
+            disagreements += 1
+        if disagreements == 0:
+            base += 0.06
+            notes.append("no timeframe in strong disagreement")
+        elif disagreements == 1:
+            base += 0.02
+            notes.append("mostly coherent (1 timeframe soft)")
+        elif disagreements == 2:
+            base -= 0.04
+            notes.append("two timeframes disagree with posture")
+        else:
+            base -= 0.08
+            notes.append(f"timeframes broadly disagree ({disagreements}/4)")
+        # Short-term direction brake — separate from the structural count
+        # above. Catches "falling this week" independent of long-horizon
+        # alignment (e.g., TSLA with a -18% dd that's still dropping).
+        if return_5d is not None and return_5d < -0.015:
+            base -= 0.08
+            notes.append(f"falling this week (ret5d {return_5d:+.1%})")
+
     # Drawdown penalty regardless of posture
     if drawdown is not None and drawdown < -0.20:
         base -= 0.15

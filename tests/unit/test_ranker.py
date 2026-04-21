@@ -30,7 +30,10 @@ def _row(**kwargs):
         # don't accidentally trigger chop detection. flat_th at close=100
         # is 0.08, so 0.2 sits firmly in "rising" territory.
         "sma_20_slope": 0.20, "sma_50_slope": 0.15,
-        "return_20d": 0.03, "return_63d": 0.05,
+        # Default multi-timeframe returns: constructive, no disagreements,
+        # so baseline tests don't accidentally trip MTF penalties.
+        "return_5d": 0.005, "return_20d": 0.03, "return_63d": 0.05,
+        "return_126d": 0.08, "return_252d": 0.12,
         "rsi_14": 55.0, "macd_histogram": 0.5,
         "realized_vol_20d": 0.15, "drawdown_current": -0.02,
         "volume_z_score": 0.2, "sector": "Technology",
@@ -108,6 +111,33 @@ def test_select_for_emission_applies_threshold_and_cap():
 
     survivors_capped = select_for_emission(cands, conviction_threshold=0.5, max_new_ideas=1)
     assert len(survivors_capped) == 1
+
+
+def test_mtf_no_disagreements_gives_bonus():
+    clean = rank(_bundle({"A": _row()}))[0]
+    # 2 mtf disagreements: 63d and 126d both outside thresholds.
+    # (V-recovery thresholds: 63d < -10%, 126d < -15%.)
+    noisy = rank(_bundle({"A": _row(return_63d=-0.12, return_126d=-0.18)}))[0]
+    assert clean.conviction_score > noisy.conviction_score
+    assert any("no timeframe in strong disagreement" in n for n in clean.reasoning_notes)
+
+
+def test_mtf_recovery_context_does_not_punish_mild_long_term_negativity():
+    # In a V-recovery, 126d and 252d can be modestly negative even for
+    # good stocks. -10% on 126d and -15% on 252d must NOT trigger any
+    # disagreement (thresholds are -15% and -25% respectively).
+    recovery = rank(_bundle({"R": _row(return_126d=-0.10, return_252d=-0.15)}))[0]
+    # Should still get the "no disagreements" full bonus.
+    assert any("no timeframe in strong disagreement" in n for n in recovery.reasoning_notes)
+
+
+def test_mtf_falling_this_week_applies_standalone_brake():
+    # TSLA case: -3% this week should trigger the 5d brake even when the
+    # structural disagreement count is fine. Penalty independent of count.
+    falling = rank(_bundle({"T": _row(return_5d=-0.03)}))[0]
+    ok = rank(_bundle({"T": _row(return_5d=0.005)}))[0]
+    assert falling.conviction_score < ok.conviction_score
+    assert any("falling this week" in n for n in falling.reasoning_notes)
 
 
 def test_flat_smas_above_support_flip_to_range_bound():

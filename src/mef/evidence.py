@@ -134,7 +134,8 @@ WITH latest AS (
      GROUP BY symbol
 )
 SELECT sed.symbol, sed.bar_date, sed.sector, sed.close,
-       sed.return_20d, sed.return_63d,
+       sed.return_5d, sed.return_20d, sed.return_63d,
+       sed.return_126d, sed.return_252d,
        sed.sma_20, sed.sma_50, sed.sma_200,
        sed.sma_20_slope, sed.sma_50_slope,
        sed.rsi_14, sed.macd_histogram,
@@ -156,7 +157,8 @@ WITH latest AS (
      GROUP BY symbol
 )
 SELECT sed.symbol, sed.bar_date, sed.close,
-       sed.return_20d, sed.return_63d,
+       sed.return_5d, sed.return_20d, sed.return_63d,
+       sed.return_126d, sed.return_252d,
        sed.sma_20, sed.sma_50, sed.sma_200,
        sed.rsi_14, sed.macd_histogram,
        sed.realized_vol_20d,
