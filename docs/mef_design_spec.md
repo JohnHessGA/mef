@@ -489,7 +489,9 @@ Every LLM call is logged to `mef.llm_trace`:
 
 ### 10.5 Failure handling
 
-If the LLM call fails or times out, MEF proceeds with the ranker's output and fills `llm_review_color` with a "LLM review unavailable" placeholder. The run does not fail. The failure is recorded in `llm_trace` and surfaced as a warning in the email footer.
+**Timeout retry.** The Claude CLI occasionally brushes up against the configured subprocess timeout on large prompts (11K+ chars commonly take 60–120s; the slowest successes have hit 115s against a 120s ceiling). `mef.llm.client.call_llm` retries **once** when the first attempt's error is a subprocess timeout: pauses `RETRY_PAUSE_S` (60s), retries at `RETRY_TIMEOUT_S` (180s). Structural errors (binary missing, non-zero exit, unparseable response) are **not** retried — retries don't help them and would double the wall clock on genuine outages. Only the second attempt is written to `mef.llm_trace`; the final error text names both attempts so audit can tell from a single trace row that a retry happened.
+
+**Fallthrough.** If both attempts fail (or a non-timeout error came back on the first try), MEF proceeds with the ranker's output and tags every survivor as `unavailable`. `GateResult.unavailable_kind` classifies the cause (`timeout` / `parse` / `error`) and `unavailable_reason` carries the detail string. Both are written to `ow.mef_event` (code `gate_unavailable`) and drive the email banner text — e.g. "⚠ LLM gate was unavailable for this run **due to LLM timeouts** — ideas below were not reviewed." The run does not fail.
 
 ---
 

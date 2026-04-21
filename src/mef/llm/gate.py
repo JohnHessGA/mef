@@ -72,6 +72,16 @@ class GateResult:
     # where the prompt asks for a synthesis block.
     synthesis: list[str] = field(default_factory=list)
 
+    # Short classification of why the gate was unavailable, carried
+    # through to the email banner. One of:
+    #   "timeout"   — LLM subprocess timed out (incl. post-retry)
+    #   "parse"     — LLM responded but we couldn't parse the JSON
+    #   "error"     — anything else (CLI missing, non-zero exit, unknown)
+    # None when available == True.
+    unavailable_kind: str | None = None
+    # Free-form one-sentence reason for audit and logs.
+    unavailable_reason: str | None = None
+
 
 def _candidate_payload(
     c: RankedCandidate,
@@ -217,6 +227,12 @@ def _all_unavailable(symbols: list[str]) -> dict[str, GateDecision]:
     }
 
 
+def _response_is_timeout(response: LLMResponse) -> bool:
+    """True when the subprocess timed out (including the post-retry case)."""
+    err = (response.error or "").lower()
+    return "timed out" in err
+
+
 def apply_gate(
     conn,
     *,
@@ -268,8 +284,11 @@ def apply_gate(
             status="error", error_text=response.error,
         )
         decisions = _all_unavailable(symbols)
+        kind = "timeout" if _response_is_timeout(response) else "error"
         result = GateResult(
             decisions=decisions, available=False, llm_trace_uid=trace_uid,
+            unavailable_kind=kind,
+            unavailable_reason=response.error,
         )
         result.unavailable = symbols[:]
         return result
@@ -284,6 +303,8 @@ def apply_gate(
         decisions = _all_unavailable(symbols)
         result = GateResult(
             decisions=decisions, available=False, llm_trace_uid=trace_uid,
+            unavailable_kind="parse",
+            unavailable_reason=f"LLM response could not be parsed: {exc}",
         )
         result.unavailable = symbols[:]
         return result

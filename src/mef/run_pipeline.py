@@ -645,7 +645,11 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
             if not gate.available:
                 ow_event(
                     severity="warning", code="gate_unavailable",
-                    message="LLM gate unavailable — ideas shipped without review",
+                    message=(
+                        f"LLM gate unavailable ({gate.unavailable_kind or 'error'}) "
+                        f"— ideas shipped without review: "
+                        f"{gate.unavailable_reason or 'no detail'}"
+                    ),
                     run_uid=run_uid,
                 )
 
@@ -786,6 +790,7 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 active_updates=[],
                 llm_gate_available=gate.available,
                 llm_gate_rejected=len(gate.rejected),
+                llm_gate_unavailable_kind=gate.unavailable_kind,
                 staleness_warning=(freshness.message if freshness.should_warn else None),
                 upcoming_macro_events=evidence.baseline.get("upcoming_high_impact_events"),
                 per_engine_top=per_engine_top_for_email,

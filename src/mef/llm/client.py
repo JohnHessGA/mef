@@ -34,6 +34,17 @@ DEFAULT_CLI_PATH = "/home/johnh/.local/bin/claude"
 DEFAULT_MODEL = "haiku"
 DEFAULT_TIMEOUT_S = 120
 
+# Retry-on-timeout policy (only for the `claude-cli` provider).
+# If the first call hits the subprocess timeout — NOT a crash, parse
+# error, or missing binary — pause ``RETRY_PAUSE_S`` seconds and try
+# once more at ``RETRY_TIMEOUT_S``. The Claude CLI sits in a slow
+# right-tail for large prompts (11K+ chars commonly take 60-120s), and
+# the first timeout is frequently a transient long-tail event rather
+# than a real hang. One retry catches most of those without doubling
+# worst-case wall-clock on genuine outages.
+RETRY_TIMEOUT_S = 180
+RETRY_PAUSE_S = 60
+
 
 @dataclass
 class LLMResponse:
@@ -50,23 +61,57 @@ class LLMResponse:
 
 
 def call_llm(prompt: str, *, timeout_s: Optional[int] = None) -> LLMResponse:
-    """Dispatch to whichever provider is configured in ``config/mef.yaml``."""
+    """Dispatch to whichever provider is configured in ``config/mef.yaml``.
+
+    For ``claude-cli`` specifically: if the first attempt hits the
+    subprocess timeout, pause ``RETRY_PAUSE_S`` and retry once with
+    ``RETRY_TIMEOUT_S``. Any other error (binary missing, parse,
+    non-zero exit) is returned immediately — those are not transient.
+    """
     cfg = load_app_config().get("llm") or {}
     provider = cfg.get("provider", "claude-cli")
     timeout_s = timeout_s or int(cfg.get("timeout_s", DEFAULT_TIMEOUT_S))
 
     if provider == "claude-cli":
-        return call_claude(
-            prompt,
-            cli_path=cfg.get("cli_path"),
-            model=cfg.get("model_hint", DEFAULT_MODEL),
-            timeout_s=timeout_s,
+        cli_path = cfg.get("cli_path")
+        model = cfg.get("model_hint", DEFAULT_MODEL)
+        first = call_claude(prompt, cli_path=cli_path, model=model, timeout_s=timeout_s)
+        if first.ok or not _is_timeout_error(first.error):
+            return first
+        # Transient-looking timeout on first attempt → pause + retry once.
+        _sleep(RETRY_PAUSE_S)
+        second = call_claude(
+            prompt, cli_path=cli_path, model=model, timeout_s=RETRY_TIMEOUT_S,
         )
+        if not second.ok and _is_timeout_error(second.error):
+            second.error = (
+                f"LLM timed out twice — first {timeout_s}s attempt and "
+                f"{RETRY_TIMEOUT_S}s retry (after {RETRY_PAUSE_S}s pause) "
+                f"both expired"
+            )
+        elif not second.ok:
+            # Second attempt failed for a different reason — annotate so
+            # audit sees the retry context rather than a bare second error.
+            second.error = (
+                f"LLM retry failed after first attempt timed out "
+                f"({timeout_s}s): {second.error}"
+            )
+        return second
     return LLMResponse(
         ok=False, text="",
         error=f"unknown LLM provider: {provider!r} (set mef.yaml → llm.provider)",
         provider=provider,
     )
+
+
+def _is_timeout_error(err: Optional[str]) -> bool:
+    """Classify an LLMResponse.error as a subprocess-timeout outcome."""
+    return bool(err) and "timed out" in err.lower()
+
+
+def _sleep(seconds: int) -> None:
+    """Indirection so tests can patch the pause to zero."""
+    time.sleep(seconds)
 
 
 def call_claude(

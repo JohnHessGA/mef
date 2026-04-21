@@ -41,6 +41,22 @@ def _fmt_ratio(v: float | None) -> str:
     return f"{v:.2f}:1" if v is not None else "n/a"
 
 
+def _unavailable_reason_suffix(kind: str | None) -> str:
+    """Human-friendly suffix for the 'LLM gate was unavailable' banner.
+
+    Maps the GateResult.unavailable_kind classification to a short
+    'due to <reason>' fragment. Kept in one place so the mapping is
+    easy to adjust when new failure classes are added.
+    """
+    if kind == "timeout":
+        return " due to LLM timeouts"
+    if kind == "parse":
+        return " due to an unparseable LLM response"
+    if kind == "error":
+        return " due to an LLM subprocess error"
+    return ""
+
+
 _ENGINE_LABELS = {
     "trend":          "trend",
     "mean_reversion": "mean-rev",
@@ -150,6 +166,7 @@ def render_daily_email(
     llm_gate_available: bool = True,
     llm_gate_rejected: int = 0,
     llm_gate_review: int = 0,
+    llm_gate_unavailable_kind: str | None = None,
     staleness_warning: str | None = None,
     staleness_aborted: bool = False,
     upcoming_macro_events: list[dict[str, Any]] | None = None,
@@ -207,7 +224,11 @@ def render_daily_email(
         lines.append("")
 
     if not llm_gate_available and not staleness_aborted:
-        lines.append("⚠ LLM gate was unavailable for this run — ideas below were not reviewed.")
+        reason_suffix = _unavailable_reason_suffix(llm_gate_unavailable_kind)
+        lines.append(
+            f"⚠ LLM gate was unavailable for this run{reason_suffix} — "
+            "ideas below were not reviewed."
+        )
         lines.append("")
 
     if upcoming_macro_events and not staleness_aborted:

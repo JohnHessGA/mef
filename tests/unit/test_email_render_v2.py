@@ -98,6 +98,45 @@ def test_not_reviewed_footer_when_gate_unavailable_wholesale():
     assert "Not reviewed by LLM" in email.body
 
 
+def test_unavailable_banner_includes_timeout_reason():
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-TO", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(llm_gate="unavailable")],
+        llm_gate_available=False,
+        llm_gate_unavailable_kind="timeout",
+    )
+    assert "LLM gate was unavailable for this run due to LLM timeouts" in email.body
+
+
+def test_unavailable_banner_includes_parse_reason():
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-PE", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(llm_gate="unavailable")],
+        llm_gate_available=False,
+        llm_gate_unavailable_kind="parse",
+    )
+    assert "unparseable LLM response" in email.body
+
+
+def test_unavailable_banner_omits_reason_when_kind_unknown():
+    # Back-compat: if the kind isn't supplied, the banner falls back to
+    # the previous unadorned wording. Guards against a regression where
+    # the new reason suffix crept in for callers that don't classify.
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-X", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(llm_gate="unavailable")],
+        llm_gate_available=False,
+    )
+    assert "LLM gate was unavailable for this run — ideas below were not reviewed." in email.body
+    assert "due to" not in email.body
+
+
 def test_rejected_counter_when_all_rejected():
     email = render_daily_email(
         when_kind="premarket", intent="today_after_10am",
