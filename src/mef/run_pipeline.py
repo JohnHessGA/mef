@@ -139,9 +139,16 @@ def _json_safe(features: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _insert_candidates(conn, run_uid: str, candidates: list[RankedCandidate]) -> dict[str, str]:
-    """Insert one candidate row per scored symbol. Returns {symbol: candidate_uid}."""
-    uid_map: dict[str, str] = {}
+def _insert_candidates(
+    conn, run_uid: str, candidates: list[RankedCandidate],
+) -> dict[tuple[str, str], str]:
+    """Insert one candidate row per (engine, symbol). Returns {(engine, symbol): uid}.
+
+    Keyed by (engine, symbol) rather than just symbol because the same
+    symbol can legitimately appear in multiple engines in the same run
+    — trend and value may both pick JNJ, for example.
+    """
+    uid_map: dict[tuple[str, str], str] = {}
     with conn.cursor() as cur:
         for cand in candidates:
             uid = next_uid(conn, "candidate")
@@ -150,9 +157,10 @@ def _insert_candidates(conn, run_uid: str, candidates: list[RankedCandidate]) ->
                 INSERT INTO mef.candidate (
                     uid, run_uid, symbol, asset_kind, posture, conviction_score,
                     feature_json, proposed_expression, proposed_entry_zone,
-                    proposed_stop, proposed_target, proposed_time_exit, emitted
+                    proposed_stop, proposed_target, proposed_time_exit, emitted,
+                    engine
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     uid, run_uid, cand.symbol, cand.asset_kind,
@@ -164,9 +172,10 @@ def _insert_candidates(conn, run_uid: str, candidates: list[RankedCandidate]) ->
                     cand.proposed_target,
                     cand.proposed_time_exit,
                     False,
+                    cand.engine,
                 ),
             )
-            uid_map[cand.symbol] = uid
+            uid_map[(cand.engine, cand.symbol)] = uid
     conn.commit()
     return uid_map
 
@@ -267,6 +276,7 @@ def _insert_recommendations(
                     target_level, target_rule,
                     time_exit_date, confidence, reasoning_summary,
                     llm_review_color,
+                    source_engines,
                     state, state_changed_by
                 )
                 VALUES (
@@ -275,6 +285,7 @@ def _insert_recommendations(
                     %s, %s,
                     %s, %s,
                     %s, %s, %s,
+                    %s,
                     %s,
                     'proposed', 'run'
                 )
@@ -293,6 +304,10 @@ def _insert_recommendations(
                     cand.conviction_score,
                     reasoning,
                     gate_reason,
+                    # Commit 1 always has exactly one engine (trend)
+                    # contributing per candidate. Multi-engine union
+                    # lands in later commits.
+                    [cand.engine],
                 ),
             )
             pnl = _estimated_pnl(cand)
@@ -526,7 +541,17 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 )
 
             all_candidates = rank(evidence)
-            candidate_uid_map = _insert_candidates(conn, run_uid, all_candidates)
+            candidate_uid_by_engine_symbol = _insert_candidates(
+                conn, run_uid, all_candidates,
+            )
+            # Single-engine callers need {symbol: uid}. Commit 1 only has
+            # the trend engine registered so this flatten is 1:1. Once
+            # multi-engine lands, the gate + emission path will key by
+            # (engine, symbol) and this compat map goes away.
+            candidate_uid_map = {
+                sym: uid
+                for (eng, sym), uid in candidate_uid_by_engine_symbol.items()
+            }
 
             top_n = select_for_emission(
                 all_candidates,

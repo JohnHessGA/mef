@@ -33,6 +33,12 @@ EXPRESSION_COVERED_CALL = "covered_call"
 EXPRESSION_CASH_SECURED_PUT = "cash_secured_put"
 
 
+ENGINE_TREND = "trend"
+ENGINE_MEAN_REVERSION = "mean_reversion"
+ENGINE_VALUE = "value"
+KNOWN_ENGINES = (ENGINE_TREND, ENGINE_MEAN_REVERSION, ENGINE_VALUE)
+
+
 @dataclass(frozen=True)
 class RankedCandidate:
     symbol: str
@@ -40,6 +46,11 @@ class RankedCandidate:
     posture: str
     conviction_score: float
     features: dict[str, Any]
+
+    # The ranker engine that produced this candidate. Defaults to the
+    # pre-existing trend-follower so any caller that doesn't yet
+    # enumerate engines keeps working.
+    engine: str = ENGINE_TREND
 
     # Draft plan — only populated for non-no_edge candidates worth emitting.
     proposed_expression: str | None = None
@@ -407,14 +418,74 @@ def _draft_plan(cand: RankedCandidate) -> RankedCandidate:
     )
 
 
-def rank(evidence: EvidenceBundle) -> list[RankedCandidate]:
-    """Score every symbol in the bundle and return a list of RankedCandidate."""
+def _rank_trend(evidence: EvidenceBundle) -> list[RankedCandidate]:
+    """Trend-follower engine — the original MEF scorer.
+
+    Rewards continuation/breakout setups: above both SMAs, rising
+    slopes, coiled-near-SMA50, MTF consensus, vol contraction, sector
+    leadership, with earnings/macro/fundamental gating.
+    """
     out: list[RankedCandidate] = []
     for symbol, row in evidence.symbols.items():
         cand = _score_symbol(symbol, row, evidence.baseline)
         if cand.posture in (POSTURE_BULLISH, POSTURE_RANGE_BOUND):
             cand = _draft_plan(cand)
         out.append(cand)
+    return out
+
+
+# Engine registry. Each engine is a callable `(EvidenceBundle) -> list[RankedCandidate]`.
+# Every returned candidate must have `engine` set to the registry key so
+# downstream code can tag `mef.candidate.engine` correctly. Additional
+# engines (mean_reversion, value) land in follow-up commits and register
+# themselves here.
+ENGINE_REGISTRY: dict[str, Any] = {
+    ENGINE_TREND: _rank_trend,
+}
+
+
+def rank(
+    evidence: EvidenceBundle,
+    *,
+    enabled_engines: list[str] | None = None,
+) -> list[RankedCandidate]:
+    """Run every enabled engine and return a single flat candidate list.
+
+    When ``enabled_engines`` is None, defaults to every engine in the
+    registry. Each engine scores independently; results are merged into
+    one list sorted by conviction (per-engine top-N selection happens
+    in ``select_for_emission`` once multi-engine wiring lands).
+    """
+    if enabled_engines is None:
+        enabled_engines = list(ENGINE_REGISTRY.keys())
+
+    out: list[RankedCandidate] = []
+    for engine_name in enabled_engines:
+        fn = ENGINE_REGISTRY.get(engine_name)
+        if fn is None:
+            continue
+        for cand in fn(evidence):
+            # Force the engine tag on every candidate so registry and
+            # output agree even if an engine implementation forgets.
+            if cand.engine != engine_name:
+                cand = RankedCandidate(
+                    symbol=cand.symbol,
+                    asset_kind=cand.asset_kind,
+                    posture=cand.posture,
+                    conviction_score=cand.conviction_score,
+                    features=cand.features,
+                    engine=engine_name,
+                    proposed_expression=cand.proposed_expression,
+                    proposed_entry_zone=cand.proposed_entry_zone,
+                    proposed_stop=cand.proposed_stop,
+                    proposed_target=cand.proposed_target,
+                    proposed_time_exit=cand.proposed_time_exit,
+                    needs_pullback=cand.needs_pullback,
+                    emitted=cand.emitted,
+                    reasoning_notes=cand.reasoning_notes,
+                )
+            out.append(cand)
+
     out.sort(key=lambda c: c.conviction_score, reverse=True)
     return out
 

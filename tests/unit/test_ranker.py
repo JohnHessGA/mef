@@ -261,6 +261,24 @@ def test_mtf_falling_this_week_applies_standalone_brake():
     assert any("falling this week" in n for n in falling.reasoning_notes)
 
 
+def test_rank_tags_candidates_with_engine_name():
+    # Every candidate produced by rank() must carry the engine name so
+    # downstream persistence (mef.candidate.engine) tags rows correctly.
+    cands = rank(_bundle({"T": _row()}))
+    assert len(cands) == 1
+    assert cands[0].engine == "trend"
+
+
+def test_rank_honors_enabled_engines_parameter():
+    # Explicit empty list disables every engine → no candidates.
+    # Useful when a future caller wants to score only a subset.
+    cands = rank(_bundle({"T": _row()}), enabled_engines=[])
+    assert cands == []
+    # Unknown engine name is silently skipped (same behavior).
+    cands = rank(_bundle({"T": _row()}), enabled_engines=["bogus"])
+    assert cands == []
+
+
 def test_flat_smas_above_support_flip_to_range_bound():
     # Both SMAs essentially flat → stock is chopping above support, not
     # actually trending. Should NOT score as bullish.
