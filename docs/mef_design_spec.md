@@ -904,15 +904,28 @@ cadence:
   timezone: America/New_York
 
 ranker:
-  conviction_threshold: 0.6
+  conviction_threshold: 0.5
   max_new_ideas_per_run: 5
+  top_n_per_engine: 3
+  hazard_overlay:
+    cap: 0.10
+    macro:
+      base: {fomc: 0.07, cpi: 0.06, pce: 0.06, nfp: 0.05, other: 0.03}
+      symbol_multipliers:
+        {broad_index: 1.25, rate_sensitive: 1.15, defensive: 0.85, default: 1.00}
+      engine_multipliers: {trend: 1.00, mean_reversion: 1.00, value: 0.60}
+    earnings_proximity:
+      trend: {days_6_to_10: 0.08, days_11_to_21: 0.03}
+  price_check:
+    enabled: true
+    info_threshold_pct: 0.01
+    warn_threshold_pct: 0.03
 
 llm:
-  provider: claude_cli
-  claude_cli:
-    binary: claude
-    model_hint: opus      # captured via response metadata
-    timeout_seconds: 120
+  provider: claude-cli
+  cli_path: /home/johnh/.local/bin/claude
+  model_hint: haiku        # captured via response metadata
+  timeout_s: 120           # first attempt; retry-on-timeout bumps to 180s
   fallback_on_error: proceed_without_llm
 
 email:

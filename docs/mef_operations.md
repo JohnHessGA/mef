@@ -38,35 +38,47 @@ Date:     2026-04-21
 Intent:   trades for today (after 10:00 ET)
 Universe: 305 stocks, 15 ETFs
 
+Summary
+-------
+Final MEF list: 3 symbols (2 high, 1 medium)
+Cross-engine confirmations: 1
+Single-engine ideas: 2
+Held for LLM review: 2
+
 📅 Upcoming high-impact US macro events:
    - 2026-04-21  Retail Sales MoM (Mar)
    - 2026-04-22  Fed Press Conference
 
 New ideas (3):
-  1. TGT — value_quality — buy_shares  [engine: value]
-     Entry zone: $126.56-$129.12
-     Stop:       $115.06
-     Target:     $140.62
-     Time exit:  2026-06-16
-     Per 100 shares: potential +$1,278.00 · risk $1,278.00 · R:R 1.00:1
-     Reasoning:  Value-quality setup with strong metrics across all
-                 timeframes; low vol; balanced risk/reward.
-  2. JCI — bullish — buy_shares  [engine: trend]  📅 earnings in 16d
-     Entry zone: $138.05-$140.87
+  1. TGT ($127.84) · high — value_quality — buy_shares  [engine: value]
+     Rec ID:          R-000072
+     Buy near:        $126.56-$129.12
+     Sell below:      $115.06
+     Sell above:      $140.62
+     Suggested hold:  through 2026-06-16
+     Per 100 shares:  potential +$1,278.00 · risk $1,278.00 · R:R 1.00:1
+     Reasoning:       Value-quality setup with strong metrics across all
+                      timeframes; low vol; balanced risk/reward.
+  2. JCI ($139.46) · high — bullish — buy_shares  [engine: trend]  📅 earnings in 16d
+     Rec ID:          R-000073
+     Buy near:        $138.05-$140.87
      ...
-  3. PSX — oversold_bouncing — buy_shares  [engine: mean-rev]
-     Entry zone: $154.81-$157.93
+  3. PSX ($156.37) · medium — oversold_bouncing — buy_shares  [engine: mean-rev]
+     Rec ID:          R-000074
+     Buy near:        $154.81-$157.93
      ...
 
 Held for review (2) — LLM flagged these for human attention, not auto-ship:
-  1. AEP — bullish — buy_shares  [engines: trend+value]
-     Entry zone: $129.68-$132.30  ⏳ wait for pullback (currently ~$133.66)
-     Stop:       $121.90
-     Target:     $141.68
-     Time exit:  2026-05-17
-     Per 100 shares: potential +$802.00 · risk $1,176.00 · R:R 0.68:1
-     Reasoning:  Pullback setup is mechanically coherent, but tight
-                 R:R with flat MACD appears fragile.
+  1. AEP ($133.66) · high — bullish — buy_shares  [engines: trend+value]
+     Rec ID:          R-000075
+     Buy near:        $129.68-$132.30  ⏳ wait for pullback (currently ~$133.66)
+     Price check:     moved +1.0% since close (live ~$133.66)
+     Sell below:      $121.90
+     Sell above:      $141.68
+     Suggested hold:  through 2026-05-17
+     Per 100 shares:  potential +$802.00 · risk $1,176.00 · R:R 0.68:1
+     Reasoning:       Pullback setup is mechanically coherent, but tight
+                      R:R with flat MACD appears fragile.
   ...
 
 Engine views (raw per-engine top picks):
