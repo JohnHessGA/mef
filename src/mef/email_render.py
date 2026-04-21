@@ -104,6 +104,96 @@ def _engine_badge(source_engines: list[str] | None) -> str:
     return f"  [engines: {'+'.join(labels)}]"
 
 
+def _parse_entry_high(entry_zone: str | None) -> float | None:
+    """Extract the upper bound of a '$LOW-$HIGH' entry-zone string.
+
+    The ranker builds entry zones with a deterministic '$NN.NN-$NN.NN'
+    shape — parsing is safe here. Returns None for anything unparseable
+    so the caller can fall back to omitting the plan line cleanly.
+    """
+    if not entry_zone:
+        return None
+    try:
+        hi = entry_zone.split("-")[-1].lstrip("$").replace(",", "")
+        return float(hi)
+    except (ValueError, IndexError):
+        return None
+
+
+def _days_until(time_exit: Any) -> int | None:
+    """Days from today to ``time_exit``. Returns None if the field is
+    missing or not a date-like object. Floors at 1 so the plan never
+    reads "Hold up to 0 days"."""
+    if time_exit is None or not hasattr(time_exit, "year"):
+        return None
+    from datetime import date as _date
+    try:
+        return max(1, (time_exit - _date.today()).days)
+    except Exception:
+        return None
+
+
+def _action_plan(idea: dict[str, Any]) -> str | None:
+    """Render a one-line plain-English action plan for an emitted idea.
+
+    Shape (buy variants):      "Buy under $X, sell near $Y, cut at $Z. Hold up to N days."
+    Shape (pullback variant):  "Wait for a dip to $X, then buy. Sell near $Y, cut at $Z. Hold up to N days."
+    Shape (premium variants):  "Sell a cash-secured put at $LOW-$HIGH. Close if SYM drops below $Z. N-day expiry."
+
+    All prices round to whole dollars — the Plan line is the skim-friendly
+    restatement of the numeric k/v block, so the full precision lives
+    below. Returns None when the idea is missing the fields we need
+    (e.g. no entry zone) and the caller should omit the line.
+    """
+    expression = idea.get("expression")
+    entry_zone = idea.get("entry_zone")
+    stop       = idea.get("stop")
+    target     = idea.get("target")
+    time_exit  = idea.get("time_exit")
+    needs_pullback = bool(idea.get("needs_pullback"))
+    symbol     = idea.get("symbol") or "the stock"
+    days       = _days_until(time_exit)
+
+    # Premium-selling variants — use the entry_zone string verbatim as
+    # the strike range. No buy-side leg, no target leg (assignment is
+    # the "target" outcome, implicit).
+    if expression == "cash_secured_put":
+        if not entry_zone or stop is None:
+            return None
+        expiry = f" {days}-day expiry." if days else ""
+        return (
+            f"Sell a cash-secured put at {entry_zone}. "
+            f"Close if {symbol} drops below ${stop:,.0f}.{expiry}"
+        )
+
+    if expression == "covered_call":
+        if not entry_zone or stop is None:
+            return None
+        expiry = f" {days}-day expiry." if days else ""
+        return (
+            f"Sell a covered call at {entry_zone}. "
+            f"Close if {symbol} drops below ${stop:,.0f}.{expiry}"
+        )
+
+    # Share / ETF buy variants.
+    entry_high = _parse_entry_high(entry_zone)
+    if entry_high is None or stop is None or target is None:
+        return None
+
+    horizon = f" Hold up to {days} days." if days else ""
+
+    if needs_pullback:
+        return (
+            f"Wait for a dip to ${entry_high:,.0f}, then buy. "
+            f"Sell near ${target:,.0f}, cut at ${stop:,.0f}.{horizon}"
+        )
+
+    return (
+        f"Buy under ${entry_high:,.0f}, "
+        f"sell near ${target:,.0f}, cut at ${stop:,.0f}.{horizon}"
+    )
+
+
 def _symbol_label(idea: dict[str, Any]) -> str:
     """Build the "SYMBOL [:etf] ($price)" fragment for an idea header.
 
@@ -160,6 +250,13 @@ def _idea_lines(idx: int, idea: dict[str, Any]) -> list[str]:
     rec_uid = idea.get("rec_uid")
     if rec_uid:
         lines.append(_kv("Rec ID", rec_uid))
+
+    # Plain-English action plan — one sentence restating the levels +
+    # horizon so the reader has a skim-friendly brief before the numeric
+    # k/v block. Silently omitted when the idea lacks the fields we need.
+    plan = _action_plan(idea)
+    if plan:
+        lines.append(_kv("Plan", plan))
 
     entry_zone = idea.get("entry_zone")
     if entry_zone:

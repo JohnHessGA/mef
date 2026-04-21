@@ -504,6 +504,170 @@ def test_macro_banner_hidden_when_no_events():
     assert "Upcoming high-impact" not in email.body
 
 
+def test_action_plan_trend_bullish_stock():
+    # Vanilla trend-bullish buy_shares: "Buy under X, sell near Y, cut at Z. Hold up to N days."
+    from datetime import date as _date, timedelta as _td
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-P1", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(
+            symbol="TJX", posture="bullish", expression="buy_shares",
+            entry_zone="$157.05-$160.68", stop=149.00, target=173.00,
+            time_exit=_date.today() + _td(days=30),
+        )],
+    )
+    body = email.body
+    assert "Plan:" in body
+    assert "Buy under $161, sell near $173, cut at $149. Hold up to 30 days." in body
+
+
+def test_action_plan_etf_buy_etf():
+    from datetime import date as _date, timedelta as _td
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-P2", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(
+            symbol="XLV", asset_kind="etf",
+            posture="bullish", expression="buy_etf",
+            entry_zone="$142.30-$145.20", stop=135.00, target=157.00,
+            time_exit=_date.today() + _td(days=30),
+        )],
+    )
+    assert "Buy under $145, sell near $157, cut at $135. Hold up to 30 days." in email.body
+
+
+def test_action_plan_needs_pullback_uses_dip_phrasing():
+    from datetime import date as _date, timedelta as _td
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-P3", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(
+            symbol="AAPL", posture="bullish", expression="buy_shares",
+            needs_pullback=True,
+            entry_zone="$180.10-$183.25", stop=169.00, target=201.00,
+            time_exit=_date.today() + _td(days=30),
+        )],
+    )
+    body = email.body
+    assert "Wait for a dip to $183, then buy. Sell near $201, cut at $169. Hold up to 30 days." in body
+    # Regression guard: must NOT render the default "Buy under" phrasing.
+    assert "Buy under" not in body
+
+
+def test_action_plan_cash_secured_put_uses_premium_phrasing():
+    from datetime import date as _date, timedelta as _td
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-P4", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(
+            symbol="PEP", posture="range_bound", expression="cash_secured_put",
+            entry_zone="$165.50-$169.80", stop=159.00, target=180.00,
+            time_exit=_date.today() + _td(days=30),
+        )],
+    )
+    body = email.body
+    assert "Sell a cash-secured put at $165.50-$169.80." in body
+    assert "Close if PEP drops below $159." in body
+    assert "30-day expiry." in body
+
+
+def test_action_plan_covered_call_uses_cc_phrasing():
+    from datetime import date as _date, timedelta as _td
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-P5", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(
+            symbol="SPY", asset_kind="etf",
+            posture="range_bound", expression="covered_call",
+            entry_zone="$440.00-$445.00", stop=420.00, target=460.00,
+            time_exit=_date.today() + _td(days=30),
+        )],
+    )
+    body = email.body
+    assert "Sell a covered call at $440.00-$445.00." in body
+    assert "Close if SPY drops below $420." in body
+    assert "30-day expiry." in body
+
+
+def test_action_plan_mean_reversion_oversold():
+    from datetime import date as _date, timedelta as _td
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-P6", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(
+            symbol="MRK", posture="oversold_bouncing", expression="buy_shares",
+            entry_zone="$97.52-$99.49", stop=91.00, target=106.00,
+            time_exit=_date.today() + _td(days=30),
+        )],
+    )
+    assert "Buy under $99, sell near $106, cut at $91. Hold up to 30 days." in email.body
+
+
+def test_action_plan_value_quality_uses_longer_horizon():
+    from datetime import date as _date, timedelta as _td
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-P7", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(
+            symbol="VZ", posture="value_quality", expression="buy_shares",
+            entry_zone="$41.38-$42.22", stop=37.00, target=46.00,
+            time_exit=_date.today() + _td(days=60),
+        )],
+    )
+    assert "Buy under $42, sell near $46, cut at $37. Hold up to 60 days." in email.body
+
+
+def test_action_plan_omitted_when_levels_missing():
+    # No stop / target / entry_zone → silently skip the Plan line rather
+    # than render garbage. Guards against the degenerate case where an
+    # idea somehow landed in the email without draft-plan fields.
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-P8", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(
+            symbol="ZZZ", posture="bullish", expression="buy_shares",
+            entry_zone=None, stop=None, target=None, time_exit=None,
+        )],
+    )
+    # No Plan line for this idea, but rest of idea block still renders.
+    body = email.body
+    assert "ZZZ" in body
+    # 'Plan:' shouldn't appear in the ZZZ block. Simplest check: the
+    # only Plan lines in this email would be ZZZ's, so none should exist.
+    assert "Plan:" not in body
+
+
+def test_action_plan_appears_right_after_rec_id():
+    # Order matters: the Plan line is meant to sit between Rec ID and
+    # the numeric k/v block (Buy near / Sell below / ...). Guard the
+    # ordering so a future insertion doesn't quietly shuffle it.
+    from datetime import date as _date, timedelta as _td
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-P9", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(
+            rec_uid="R-000099", symbol="TGT",
+            posture="bullish", expression="buy_shares",
+            entry_zone="$140.00-$143.00", stop=132.00, target=155.00,
+            time_exit=_date.today() + _td(days=30),
+        )],
+    )
+    body = email.body
+    rec_i = body.index("Rec ID:")
+    plan_i = body.index("Plan:")
+    buy_near_i = body.index("Buy near:")
+    assert rec_i < plan_i < buy_near_i
+
+
 def test_staleness_warning_banner_when_warn_only():
     email = render_daily_email(
         when_kind="premarket", intent="today_after_10am",

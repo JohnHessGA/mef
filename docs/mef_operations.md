@@ -52,6 +52,7 @@ Held for LLM review: 2
 New ideas (3):
   1. TGT ($127.84) · high — value_quality — buy_shares  [engine: value]
      Rec ID:          R-000072
+     Plan:            Buy under $129, sell near $141, cut at $115. Hold up to 56 days.
      Buy near:        $126.56-$129.12
      Sell below:      $115.06
      Sell above:      $140.62
@@ -61,16 +62,19 @@ New ideas (3):
                       timeframes; low vol; balanced risk/reward.
   2. JCI ($139.46) · high — bullish — buy_shares  [engine: trend]  📅 earnings in 16d
      Rec ID:          R-000073
+     Plan:            Buy under $141, sell near $151, cut at $130. Hold up to 30 days.
      Buy near:        $138.05-$140.87
      ...
   3. PSX ($156.37) · medium — oversold_bouncing — buy_shares  [engine: mean-rev]
      Rec ID:          R-000074
+     Plan:            Buy under $158, sell near $169, cut at $145. Hold up to 30 days.
      Buy near:        $154.81-$157.93
      ...
 
 Held for review (2) — LLM flagged these for human attention, not auto-ship:
   1. AEP ($133.66) · high — bullish — buy_shares  [engines: trend+value]
      Rec ID:          R-000075
+     Plan:            Wait for a dip to $132, then buy. Sell near $142, cut at $122. Hold up to 26 days.
      Buy near:        $129.68-$132.30  ⏳ wait for pullback (currently ~$133.66)
      Price check:     moved +1.0% since close (live ~$133.66)
      Sell below:      $121.90

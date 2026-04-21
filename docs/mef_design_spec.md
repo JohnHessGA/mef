@@ -729,6 +729,7 @@ Held for LLM review: J
 New ideas (K):  ← LLM-approved + unavailable-fallback
   1. SYMBOL[:etf] ($price) · high — posture — expression  [engine: …]  [📅 earnings in 14d]
      Rec ID:          R-000xxx
+     Plan:            Buy under $X, sell near $Y, cut at $Z. Hold up to N days.
      Buy near:        $LOW-$HIGH     [⏳ wait for pullback (currently ~$PX)]
      Price check:     moved +1.7% since close (live ~$X.XX)   ← tier info/warn
      Sell below:      $…
@@ -778,6 +779,21 @@ the reader scrolls into details.
 
 **Rec ID line.** Every idea prints its `R-0000xx` so the closing CLI
 hint (`mef show <rec-id>`) is directly actionable from the email.
+
+**Plan line.** One plain-English sentence restating the levels + hold
+horizon, rendered right after Rec ID so it sits where the eye lands
+after the symbol header. Shape depends on the expression:
+
+- Buy variants: `"Buy under $X, sell near $Y, cut at $Z. Hold up to N days."`
+- Pullback variant (`needs_pullback=True`): `"Wait for a dip to $X, then buy. Sell near $Y, cut at $Z. Hold up to N days."`
+- Premium variants (cash-secured put / covered call): `"Sell a cash-secured put at $LOW-$HIGH. Close if SYM drops below $Z. N-day expiry."`
+
+Prices round to whole dollars — the Plan line is a skim-friendly
+restatement, so the full precision lives in the numeric k/v block
+below. Deterministic: all inputs are already on the idea dict
+(`entry_zone`, `stop`, `target`, `time_exit`, `needs_pullback`,
+`expression`, `symbol`) — no LLM call. Silently omitted when those
+fields are missing.
 
 **Price check line.** The post-emission price-freshness check
 (`mef.price_check`, see `mef_price_check.md`) fetches a live Yahoo
