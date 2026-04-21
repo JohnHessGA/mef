@@ -658,6 +658,239 @@ def _rank_mean_reversion(evidence: EvidenceBundle) -> list[RankedCandidate]:
     return out
 
 
+POSTURE_VALUE_QUALITY = "value_quality"
+
+
+def _score_value(symbol: str, row: dict[str, Any], baseline: dict[str, Any]) -> RankedCandidate:
+    """Value/quality engine scorer.
+
+    Rewards cheap + durable names. Typical picks are consumer staples,
+    utilities, financials, and healthcare with positive free cash flow,
+    moderate PE, and modest-but-positive long-term trend. Explicitly
+    NOT for the same names the trend engine loves — expensive momentum
+    stocks (PE > 30 AND extended above SMA50) are penalized.
+
+    Posture `value_quality` when a setup is present, `no_edge`
+    otherwise. Draft plan uses a longer time_exit (60 days vs trend's
+    30) because value plays take time to pay off.
+    """
+    close = row.get("close")
+    sma_50 = row.get("sma_50")
+    sma_200 = row.get("sma_200")
+    rsi = row.get("rsi_14")
+    return_20d = row.get("return_20d")
+    return_252d = row.get("return_252d")
+    pe = row.get("pe_trailing")
+    fcf = row.get("free_cash_flow")
+    ey = row.get("earnings_yield")
+    bar_date = row.get("bar_date") or date.today()
+
+    # Minimum viable evidence.
+    if close is None or row.get("asset_kind") != "stock":
+        # Value engine is equities-only. ETFs fall through as no_edge.
+        return RankedCandidate(
+            symbol=symbol,
+            asset_kind=row.get("asset_kind", "stock"),
+            posture=POSTURE_NO_EDGE,
+            conviction_score=0.0,
+            features=row,
+            engine=ENGINE_VALUE,
+            reasoning_notes=["value engine is equities-only"],
+        )
+
+    # Gate 1: must have the fundamental signals. If mart doesn't carry
+    # PE / FCF / EY for this name, we have no value opinion.
+    if pe is None or fcf is None or ey is None:
+        return RankedCandidate(
+            symbol=symbol,
+            asset_kind=row.get("asset_kind", "stock"),
+            posture=POSTURE_NO_EDGE,
+            conviction_score=0.0,
+            features=row,
+            engine=ENGINE_VALUE,
+            reasoning_notes=["missing fundamentals for value engine"],
+        )
+
+    # Gate 2: negative FCF is a hard veto (consistent with trend).
+    # Also veto deeply negative 252d — "cheap and falling" is a trap,
+    # not value.
+    if fcf < 0:
+        return RankedCandidate(
+            symbol=symbol,
+            asset_kind=row.get("asset_kind", "stock"),
+            posture=POSTURE_NO_EDGE,
+            conviction_score=0.0,
+            features=row,
+            engine=ENGINE_VALUE,
+            reasoning_notes=["negative TTM FCF → veto"],
+        )
+    if return_252d is not None and return_252d < -0.20:
+        return RankedCandidate(
+            symbol=symbol,
+            asset_kind=row.get("asset_kind", "stock"),
+            posture=POSTURE_NO_EDGE,
+            conviction_score=0.0,
+            features=row,
+            engine=ENGINE_VALUE,
+            reasoning_notes=[f"long-term downtrend ({return_252d:+.1%}/252d)"],
+        )
+
+    notes: list[str] = []
+    posture = POSTURE_VALUE_QUALITY
+    base = 0.50
+
+    # Valuation — cheap is the primary signal.
+    if 5 <= pe <= 15:
+        base += 0.10
+        notes.append(f"PE {pe:.1f} (cheap)")
+    elif 15 < pe <= 25:
+        base += 0.05
+        notes.append(f"PE {pe:.1f} (fair)")
+    elif pe > 30:
+        base -= 0.05
+        notes.append(f"PE {pe:.1f} (expensive for value)")
+    elif pe < 5:
+        # Extreme cheapness often indicates distress, not value.
+        base -= 0.03
+        notes.append(f"PE {pe:.1f} (possibly distressed)")
+
+    # Earnings yield — direct cheapness measure.
+    if ey > 0.07:
+        base += 0.08
+        notes.append(f"earnings yield {ey:.1%}")
+    elif ey > 0.05:
+        base += 0.04
+        notes.append(f"earnings yield {ey:.1%}")
+    elif ey < 0.02:
+        base -= 0.03
+        notes.append(f"earnings yield {ey:.1%} (expensive)")
+
+    # Durability — long-term trend should be modestly positive. Value
+    # works when the business actually compounds, not when it's stuck.
+    if return_252d is not None:
+        if return_252d > 0.10:
+            base += 0.05
+            notes.append(f"long-term trend +{return_252d:.1%}/252d")
+        elif return_252d > 0:
+            base += 0.02
+            notes.append(f"long-term trend +{return_252d:.1%}/252d")
+
+    # Not-extended guard — value and momentum-extension are opposites.
+    # Penalize names already well above SMA50 (they belong to trend).
+    if sma_50 is not None and sma_50 > 0:
+        ext_pct = (close / sma_50) - 1.0
+        if ext_pct > 0.10:
+            base -= 0.08
+            notes.append(f"extended +{ext_pct:.1%} above SMA50 (momentum, not value)")
+
+    # Moderate positive short-term momentum is ok — we don't want to
+    # buy a falling name. RSI sanity check.
+    if rsi is not None:
+        if 40 <= rsi <= 65:
+            base += 0.03
+            notes.append(f"RSI stable ({rsi:.0f})")
+        elif rsi < 30:
+            # Oversold value — that's mean-reversion territory; value
+            # engine doesn't want to double-count there.
+            base -= 0.05
+            notes.append(f"RSI oversold ({rsi:.0f}) → mean-rev turf")
+
+    # FCF size signal — larger FCF in absolute $ is a quality proxy
+    # for a durable cash-generating business.
+    if fcf > 5_000_000_000:
+        base += 0.04
+        notes.append("robust FCF (>$5B)")
+
+    # Earnings gate — value plays take time, so earnings in window
+    # matters more for entry timing than for trend. Same thresholds.
+    next_earn = row.get("next_earnings_date")
+    if next_earn is not None:
+        days_to_earn = (next_earn - bar_date).days
+        if 0 <= days_to_earn <= 10:
+            posture = POSTURE_NO_EDGE
+            base = 0.0
+            notes.append(f"earnings in {days_to_earn}d → veto")
+        elif 0 <= days_to_earn <= 21:
+            base -= 0.05
+            notes.append(f"earnings in {days_to_earn}d → caution")
+
+    # Macro-event dampener.
+    if posture == POSTURE_VALUE_QUALITY:
+        events = baseline.get("upcoming_high_impact_events") or []
+        for ev in events:
+            days_to_ev = (ev["date"] - bar_date).days
+            if 0 <= days_to_ev <= 1:
+                base -= 0.05
+                notes.append(
+                    f"high-impact macro event {ev['event']} in {days_to_ev}d"
+                )
+                break
+
+    conviction = _clamp(base, 0.0, 1.0)
+    if conviction < 0.40:
+        posture = POSTURE_NO_EDGE
+
+    return RankedCandidate(
+        symbol=symbol,
+        asset_kind=row.get("asset_kind", "stock"),
+        posture=posture,
+        conviction_score=round(conviction, 4),
+        features=row,
+        engine=ENGINE_VALUE,
+        reasoning_notes=notes,
+    )
+
+
+def _draft_plan_value(cand: RankedCandidate) -> RankedCandidate:
+    """Entry/stop/target for value candidates.
+
+    Value plays aren't about precise entry — they compound over time.
+    Entry is "at market, any day this week" (±1%). Stop is wider (10%
+    below close) because short-term noise shouldn't shake the thesis.
+    Target is a modest +10% over a 60-day window — cheaper per-diem
+    expectation than trend (+8% over 30) because value is patient.
+    """
+    close = cand.features.get("close")
+    if close is None or cand.posture != POSTURE_VALUE_QUALITY:
+        return cand
+
+    expression = EXPRESSION_BUY_SHARES
+    entry_low = round(close * 0.99, 2)
+    entry_high = round(close * 1.01, 2)
+    stop = round(close * 0.90, 2)     # wider than trend's 7%
+    target = round(close * 1.10, 2)   # modest 10% over 60 days
+
+    bar_date = cand.features.get("bar_date") or date.today()
+    time_exit = bar_date + timedelta(days=60)  # patient horizon
+
+    return RankedCandidate(
+        symbol=cand.symbol,
+        asset_kind=cand.asset_kind,
+        posture=cand.posture,
+        conviction_score=cand.conviction_score,
+        features=cand.features,
+        engine=cand.engine,
+        proposed_expression=expression,
+        proposed_entry_zone=f"${entry_low:.2f}-${entry_high:.2f}",
+        proposed_stop=stop,
+        proposed_target=target,
+        proposed_time_exit=time_exit,
+        needs_pullback=False,
+        reasoning_notes=cand.reasoning_notes,
+    )
+
+
+def _rank_value(evidence: EvidenceBundle) -> list[RankedCandidate]:
+    """Value/quality engine — cheap + durable setups."""
+    out: list[RankedCandidate] = []
+    for symbol, row in evidence.symbols.items():
+        cand = _score_value(symbol, row, evidence.baseline)
+        if cand.posture == POSTURE_VALUE_QUALITY:
+            cand = _draft_plan_value(cand)
+        out.append(cand)
+    return out
+
+
 def _rank_trend(evidence: EvidenceBundle) -> list[RankedCandidate]:
     """Trend-follower engine — the original MEF scorer.
 
@@ -682,6 +915,7 @@ def _rank_trend(evidence: EvidenceBundle) -> list[RankedCandidate]:
 ENGINE_REGISTRY: dict[str, Any] = {
     ENGINE_TREND:          _rank_trend,
     ENGINE_MEAN_REVERSION: _rank_mean_reversion,
+    ENGINE_VALUE:          _rank_value,
 }
 
 

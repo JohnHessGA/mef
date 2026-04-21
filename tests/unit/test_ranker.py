@@ -78,24 +78,26 @@ def test_below_both_smas_is_bearish_caution():
     cands = rank(_bundle({"X": _row(
         symbol="X", close=80.0, sma_50=95.0, sma_200=90.0,
         trend_above_sma50=False, trend_above_sma200=False,
-    )}))
+    )}), enabled_engines=["trend"])
     assert cands[0].posture == POSTURE_BEARISH_CAUTION
 
 
 def test_overbought_uptrend_becomes_range_bound():
-    cands = rank(_bundle({"Y": _row(symbol="Y", rsi_14=78.0)}))
+    cands = rank(_bundle({"Y": _row(symbol="Y", rsi_14=78.0)}),
+                 enabled_engines=["trend"])
     assert cands[0].posture == POSTURE_RANGE_BOUND
 
 
 def test_mixed_trend_is_range_bound():
     cands = rank(_bundle({"Z": _row(
         symbol="Z", trend_above_sma50=True, trend_above_sma200=False,
-    )}))
+    )}), enabled_engines=["trend"])
     assert cands[0].posture == POSTURE_RANGE_BOUND
 
 
 def test_missing_sma_is_no_edge():
-    cands = rank(_bundle({"Q": _row(symbol="Q", sma_50=None, sma_200=None)}))
+    cands = rank(_bundle({"Q": _row(symbol="Q", sma_50=None, sma_200=None)}),
+                 enabled_engines=["trend"])
     assert cands[0].posture == POSTURE_NO_EDGE
     assert cands[0].conviction_score == 0.0
 
@@ -334,6 +336,96 @@ def test_mean_rev_and_trend_produce_disjoint_candidates():
     # But only mean_rev should produce an emittable posture here.
     assert mr[0].posture == "oversold_bouncing"
     assert trend[0].posture != "bullish"   # trend won't call this bullish
+
+
+def _value_row(**kwargs):
+    """Row shaped for the value engine: moderate PE, positive FCF, stable."""
+    base = {
+        "symbol": "VAL", "asset_kind": "stock", "bar_date": date(2026, 4, 17),
+        "close": 100.0, "sma_20": 99.0, "sma_50": 98.0, "sma_200": 95.0,
+        "sma_20_slope": 0.05, "sma_50_slope": 0.03,
+        "return_5d": 0.002, "return_20d": 0.015, "return_63d": 0.03,
+        "return_126d": 0.06, "return_252d": 0.12,
+        "rsi_14": 50.0,
+        "macd_histogram": 0.1, "macd_value": 0.0, "macd_signal": -0.05,
+        "realized_vol_20d": 0.14, "realized_vol_63d": 0.15,
+        "drawdown_current": -0.03, "volume_z_score": 0.0,
+        "sector": "Consumer Defensive",
+        "trend_above_sma50": True, "trend_above_sma200": True,
+        "free_cash_flow": 8_000_000_000.0, "pe_trailing": 12.0,
+        "earnings_yield": 0.08, "rs_vs_spy_20d": 0.0,
+        "rs_vs_spy_63d": 0.01, "rs_vs_qqq_63d": 0.0,
+        "atr_14": 1.2, "next_earnings_date": None,
+    }
+    base.update(kwargs)
+    return base
+
+
+def test_value_engine_scores_cheap_durable_setup():
+    cand = rank(_bundle({"V": _value_row()}), enabled_engines=["value"])[0]
+    assert cand.engine == "value"
+    assert cand.posture == "value_quality"
+    assert cand.conviction_score >= 0.7
+    # Draft plan uses a 60-day time_exit (patient horizon).
+    days = (cand.proposed_time_exit - cand.features["bar_date"]).days
+    assert days == 60
+
+
+def test_value_engine_vetos_negative_fcf():
+    cand = rank(_bundle({"B": _value_row(free_cash_flow=-500_000_000.0)}),
+                enabled_engines=["value"])[0]
+    assert cand.posture == "no_edge"
+    assert any("FCF" in n for n in cand.reasoning_notes)
+
+
+def test_value_engine_vetos_long_term_downtrend():
+    cand = rank(_bundle({"D": _value_row(return_252d=-0.25)}),
+                enabled_engines=["value"])[0]
+    assert cand.posture == "no_edge"
+    assert any("long-term downtrend" in n for n in cand.reasoning_notes)
+
+
+def test_value_engine_penalizes_momentum_names():
+    """Extended above SMA50 → that's trend territory, not value."""
+    val = rank(_bundle({"V": _value_row()}), enabled_engines=["value"])[0]
+    momo = rank(_bundle({"M": _value_row(close=120.0, sma_50=100.0)}),  # +20%
+                enabled_engines=["value"])[0]
+    assert val.conviction_score > momo.conviction_score
+
+
+def test_value_engine_ignores_etfs():
+    cand = rank(_bundle({"SPY": _value_row(
+        symbol="SPY", asset_kind="etf",
+        free_cash_flow=None, pe_trailing=None, earnings_yield=None,
+    )}), enabled_engines=["value"])[0]
+    assert cand.posture == "no_edge"
+
+
+def test_all_three_engines_score_distinct_intent_setups():
+    """Sanity: each engine picks its intended candidate.
+
+    Full disjointness is NOT expected — an oversold name with good
+    fundamentals legitimately belongs to both mean-reversion AND value.
+    The property we care about is that each engine picks up its
+    matching setup, not that engines never overlap.
+    """
+    bundle = _bundle({
+        "TRND":  _row(symbol="TRND"),                # trend-friendly
+        "OSOL":  _oversold_row(symbol="OSOL"),       # mean-rev setup
+        "VALQ":  _value_row(symbol="VALQ"),          # value setup
+    })
+    cands = rank(bundle)
+    picks = {
+        (c.symbol, c.engine): c.posture for c in cands
+        if c.posture not in ("no_edge",)
+    }
+    # Each intended-matching engine picks its symbol.
+    assert picks.get(("TRND", "trend")) == "bullish"
+    assert picks.get(("OSOL", "mean_reversion")) == "oversold_bouncing"
+    assert picks.get(("VALQ", "value")) == "value_quality"
+    # Trend should NOT pick the mean-rev row — oversold names aren't
+    # trend-engine territory by construction.
+    assert ("OSOL", "trend") not in picks or picks.get(("OSOL", "trend")) in ("range_bound", "bearish_caution")
 
 
 def test_rank_tags_candidates_with_engine_name():
