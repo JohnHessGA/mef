@@ -39,6 +39,12 @@ from mef.ranker import (
 )
 from mef.paper_scoring import paper_score_emitted
 from mef.pnl_tracking import snapshot_daily_pnl
+from mef.price_check import (
+    TIER_UNAVAILABLE as PRICE_TIER_UNAVAILABLE,
+    TIER_WARN as PRICE_TIER_WARN,
+    annotate_ideas as annotate_price_check,
+    check_prices,
+)
 from mef.scoring import score_all_pending
 from mef.shadow_scoring import shadow_score_rejected
 from mef.telemetry import (
@@ -656,6 +662,34 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                     _uids_for_symbol(candidate_uid_by_engine_symbol, row["symbol"])
                 )
             _mark_emitted(conn, emitted_uids)
+
+            # Post-emission price-freshness sanity check. Fetches "now"
+            # quotes for the handful of symbols we're about to email
+            # and annotates each row with a tier + note. Never changes
+            # conviction or plan — purely informational for the email.
+            price_cfg = ranker_cfg.get("price_check") or {}
+            price_summary = check_prices(
+                emitted_rows,
+                info_threshold_pct=float(price_cfg.get("info_threshold_pct", 0.01)),
+                warn_threshold_pct=float(price_cfg.get("warn_threshold_pct", 0.03)),
+                enabled=bool(price_cfg.get("enabled", True)),
+            )
+            annotate_price_check(emitted_rows, price_summary)
+            if price_summary.fetch_error:
+                ow_event(
+                    severity="warning", code="price_check_fetch_failed",
+                    message=price_summary.fetch_error, run_uid=run_uid,
+                )
+            warn_syms = [
+                row["symbol"] for row in emitted_rows
+                if row.get("price_check_tier") == PRICE_TIER_WARN
+            ]
+            if warn_syms:
+                ow_event(
+                    severity="warning", code="price_check_stale",
+                    message=f"stale entry zone suspected for {','.join(warn_syms)}",
+                    run_uid=run_uid,
+                )
 
             candidates_passed = sum(
                 1 for c in all_candidates if c.posture in EMITTABLE_POSTURES

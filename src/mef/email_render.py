@@ -99,6 +99,13 @@ def _idea_lines(idx: int, idea: dict[str, Any]) -> list[str]:
             lines.append(f"     Entry zone: {entry_zone}  ⏳ wait for pullback{price_hint}")
         else:
             lines.append(f"     Entry zone: {entry_zone}")
+
+    # Price-freshness annotation from mef.price_check. Emitted on its
+    # own line so it's visible without cramming the entry-zone line.
+    # Only renders when the tier is info or warn (< 1% moves are silent).
+    price_note = idea.get("price_check_note")
+    if price_note:
+        lines.append(f"     Price check: {price_note}")
     stop = idea.get("stop")
     target = idea.get("target")
     time_exit = idea.get("time_exit")

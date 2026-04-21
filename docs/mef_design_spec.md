@@ -79,6 +79,7 @@ Conceptual modules (concrete module layout lives with the code):
 | `llm` | Pluggable LLM client (Claude CLI default), prompt assembly, `llm_trace` logging |
 | `recommendations` | Lifecycle state machine, active-position inference, dismissal, expiration, close detection |
 | `scoring` | Compute win/loss/timeout + estimated 100-share P&L + benchmark comparisons |
+| `price_check` | Post-emission yfinance "now" quote on the ~5–10 emitted ideas; annotates the email with a freshness tier. Informational only — never changes conviction or plan. See `mef_price_check.md`. |
 | `email` | Render pre-market / post-market email bodies; hand to `notify.py` |
 | `cli` | argparse entry points for every `mef` subcommand |
 | `telemetry` | Fail-silent writes to `ow.mef_run` / `ow.mef_event` |

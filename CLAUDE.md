@@ -18,6 +18,7 @@ The spec is the source of truth. Read the relevant section before implementing; 
 | `docs/README_mef.md` | Build specification — purpose, scope, UX, universe, daily workflow, lifecycle, CLI surface, hard boundaries, build order |
 | `docs/mef_design_spec.md` | Architectural design — components, data sources, pipeline, evidence, ranking, lifecycle state machine, LLM policy, MEFDB schema, email rendering, telemetry, repo shape |
 | `docs/mef_layered_gating.md` | **Canonical** reference for the Layer A / Layer B / Layer C model (eligibility / hazard overlay / engine thesis). Wins over design spec on any gating conflict. |
+| `docs/mef_price_check.md` | Post-emission live-price sanity check. Runs on emitted ideas only; informational, never changes conviction. |
 | `notes/muse-engine-forecaster-overview.md` | Original product-vision note (human-authored) |
 | `notes/focus-universe-us-stocks-final.md` | Stock universe (305) |
 | `notes/core-us-etfs-daily-final.md` | ETF universe (15) |
@@ -47,7 +48,7 @@ These are load-bearing. Stop and ask before crossing any of them.
 
 ## Environment
 
-- **Python:** 3.12, src layout, editable install via `pyproject.toml` (`pip install -e .`)
+- **Python:** 3.12, src layout, editable install via `pyproject.toml` (`pip install -e .`). Runtime deps: `psycopg2-binary`, `pyyaml`, `yfinance` (used by `mef.price_check` for post-emission live quotes).
 - **Virtual env:** `~/repos/mef/venv/` (created with `python3 -m venv venv`)
 - **Host:** WSL2 Ubuntu 24.04 (`codex`) on Windows 11 (`hal64`)
 - **Databases:** PostgreSQL 16 + TimescaleDB on `localhost:5432`

@@ -60,6 +60,32 @@ def test_idea_surfaces_rec_uid_for_cli_show():
     assert "Rec ID:" in email.body
 
 
+def test_price_check_note_renders_when_present():
+    # The post-emission price-freshness check annotates each idea with a
+    # short note when the live price has moved meaningfully since the
+    # SHDB close. The email should surface that note on its own line.
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-1", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(price_check_note="⚠ moved +4.2% since close")],
+    )
+    assert "Price check:" in email.body
+    assert "⚠ moved +4.2% since close" in email.body
+
+
+def test_price_check_note_omitted_when_absent():
+    # Silent when the tier is "none" (< info threshold) — the field is
+    # simply not set, so the line should not appear.
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-2", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea()],
+    )
+    assert "Price check:" not in email.body
+
+
 def test_not_reviewed_footer_when_gate_unavailable_wholesale():
     email = render_daily_email(
         when_kind="premarket", intent="today_after_10am",
