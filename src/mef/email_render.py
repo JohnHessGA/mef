@@ -294,14 +294,61 @@ def _idea_lines(idx: int, idea: dict[str, Any]) -> list[str]:
             f"potential +{_fmt_money(gain)} · risk {_fmt_money(loss)} · R:R {_fmt_ratio(rr)}",
         ))
 
-    reasoning = idea.get("reasoning_summary")
-    if reasoning:
-        lines.append(_kv("Reasoning", reasoning))
+    lines.extend(_rich_llm_block(idea))
 
     gate = idea.get("llm_gate")
     if gate == "unavailable":
         lines.append("     ⚠ Not reviewed by LLM (gate unavailable).")
     return lines
+
+
+# Hard caps for the rendered rich-output block. The prompt permits up
+# to 3 bullets each; the email caps at 2 to keep each idea skimmable.
+_EMAIL_MAX_STRENGTHS = 2
+_EMAIL_MAX_CONCERNS = 2
+# Continuation indent for bullet wrap-lines — lines up under the first
+# bullet so a multi-bullet list reads as one visual column.
+_BULLET_CONT = " " * (5 + _LABEL_W + 1 + 1) + "- "
+
+
+def _rich_llm_block(idea: dict[str, Any]) -> list[str]:
+    """Render the LLM's structured review output for one idea.
+
+    Emits Summary / Strengths / Concerns / Judgment lines when the
+    idea dict carries them (populated by the pipeline from the gate's
+    per-candidate output). Falls back to a single ``Reasoning:`` line
+    from ``reasoning_summary`` when the rich fields are absent — covers
+    LLM-unavailable runs and historical recommendations emitted before
+    the 2026-04-21 prompt rewrite.
+
+    Strengths and concerns are capped at 2 bullets each to keep the
+    email skim-friendly, even if the LLM returned 3.
+    """
+    summary = idea.get("llm_summary")
+    strengths = (idea.get("llm_strengths") or [])[:_EMAIL_MAX_STRENGTHS]
+    concerns = (idea.get("llm_concerns") or [])[:_EMAIL_MAX_CONCERNS]
+    judgment = idea.get("llm_key_judgment")
+
+    if not any([summary, strengths, concerns, judgment]):
+        # No rich output available — fall back to the single-line
+        # reasoning the pipeline composes from LLM summary or ranker notes.
+        reasoning = idea.get("reasoning_summary")
+        return [_kv("Reasoning", reasoning)] if reasoning else []
+
+    out: list[str] = []
+    if summary:
+        out.append(_kv("Summary", summary))
+    if strengths:
+        out.append(_kv("Strengths", f"- {strengths[0]}"))
+        for s in strengths[1:]:
+            out.append(f"{_BULLET_CONT}{s}")
+    if concerns:
+        out.append(_kv("Concerns", f"- {concerns[0]}"))
+        for s in concerns[1:]:
+            out.append(f"{_BULLET_CONT}{s}")
+    if judgment:
+        out.append(_kv("Judgment", judgment))
+    return out
 
 
 def _summary_block(
@@ -363,27 +410,12 @@ def render_daily_email(
     staleness_aborted: bool = False,
     upcoming_macro_events: list[dict[str, Any]] | None = None,
     per_engine_top: dict[str, list[dict[str, Any]]] | None = None,
-    synthesis_order: list[str] | None = None,
 ) -> RenderedEmail:
     new_ideas = new_ideas or []
     review_ideas = review_ideas or []
     active_updates = active_updates or []
     upcoming_macro_events = upcoming_macro_events or []
     per_engine_top = per_engine_top or {}
-    synthesis_order = synthesis_order or []
-
-    # Reorder new_ideas by the LLM's synthesis if available. The
-    # synthesis is the LLM's ordered top picks across all engines —
-    # treat it as the actionable ordering for the email. Items the LLM
-    # approved but didn't include in synthesis fall to the bottom,
-    # preserving conviction order among themselves.
-    if synthesis_order and new_ideas:
-        order_index = {sym: i for i, sym in enumerate(synthesis_order)}
-        big = len(synthesis_order) + 1
-        new_ideas = sorted(
-            new_ideas,
-            key=lambda idea: order_index.get(idea.get("symbol", ""), big),
-        )
 
     subject_prefix = _SUBJECT_PREFIX.get(when_kind, "MEF report")
     date_label = started_at.strftime("%Y-%m-%d")
@@ -472,8 +504,8 @@ def render_daily_email(
 
     # Per-engine top-N sections — the raw output of each ranker engine,
     # rendered concisely (one line per pick) so the user can see what
-    # each engine surfaced before the LLM's synthesis narrowed it. Order
-    # is fixed: trend → mean-reversion → value.
+    # each engine surfaced before the LLM gate weighed in. Order is
+    # fixed: trend → mean-reversion → value.
     if per_engine_top:
         lines.append("Engine views (raw per-engine top picks):")
         _engine_order = ("trend", "mean_reversion", "value")

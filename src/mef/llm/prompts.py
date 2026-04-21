@@ -1,15 +1,22 @@
 """Prompt templates for MEF's LLM gate.
 
-v2 prompt (2026-04-XX):
-- 3-way disposition: approve / review / reject
-- Server-validated issue_type enum
-- Strict review order (mechanical → trade-shape → durable knowledge → missing-context)
-- Conservative bias — "review" for borderline; "approve" only when coherent
-- Future-proofed for option candidates (currently inactive: MEF v1 only emits stock/ETF)
+2026-04-21 rewrite (v3):
+- Role framed as a disciplined investment-idea reviewer, not a rule-checker.
+- Evaluation axes: thesis clarity, internal consistency, evidence quality,
+  timing / present attractiveness, risk vs reward, hidden concerns.
+- Explicit "do not confuse a good company with a good opportunity now."
+- Posture glossary covering all six postures the ranker can emit.
+- Hazard overlay is shown to the LLM and declared already priced —
+  only elevate if materially under-priced.
+- Per-candidate output is now structured: summary + strengths[] + concerns[]
+  + key_judgment, in place of the single ``reason`` string.
+- Synthesis (ordered top-pick array) and max_new_ideas have been removed —
+  the ranker narrows upstream and the LLM judges independently per candidate.
+- ``issue_type`` enum removed — ``concerns`` carries the signal.
 
 Edits to the template land here. Every call's full prompt is recorded in
-``mef.llm_trace`` so we can diff prompt changes against outcome quality
-once the audit corpus accumulates (mef.paper_score + mef.shadow_score).
+``mef.llm_trace`` so prompt changes can be diffed against outcome quality
+once the paper + shadow scoring corpus accumulates.
 """
 
 from __future__ import annotations
@@ -17,181 +24,167 @@ from __future__ import annotations
 from typing import Any
 
 
-# Allowed issue_type strings — must match the CHECK constraint in
-# sql/mefdb/005_gate_review_disposition.sql. The gate parser validates
-# against this set and coerces unknown values to "missing_context".
-ALLOWED_ISSUE_TYPES = (
-    "none",
-    "mechanical",
-    "risk_shape",
-    "volatility_mismatch",
-    "posture_mismatch",
-    "asset_structure",
-    "options_structure",
-    "missing_context",
-)
-
 ALLOWED_DECISIONS = ("approve", "review", "reject")
 
 
 GATE_PROMPT_TEMPLATE = """\
-You are reviewing the output of a deterministic daily ranker built for
-selective stock/ETF trading over a curated US universe. Some candidates may
-ultimately be expressed with options, but your primary job is to evaluate
-whether the underlying setup is coherent enough to ship.
+You are a disciplined, conservative reviewer of proposed investment
+candidates. Your task is to determine whether each candidate should be
+**approved**, held for **review**, or **rejected** based only on the
+information provided. Your job is not to generate new ideas, rank a
+top-pick list, or force approvals. It is completely acceptable to
+return no approved ideas in a given run.
 
-The ranker has emitted {n_candidates} candidate recommendation(s). Each
-candidate carries a posture, conviction score, and a draft plan produced from
-deterministic rules only. No current news, no browsing, and no post-cutoff
-events are available to you.
+Evaluate whether each candidate appears worth considering **at this time**
+based on the supplied evidence, with attention to thesis quality,
+internal consistency, timing, risk, and overall attractiveness as an
+investment candidate.
 
-MEF is advisory only and intentionally selective. It is healthy for this gate
-to approve none of the candidates on a weak day.
-
-Your job is to gate each candidate with exactly one disposition:
-
-- "approve" = safe to ship as-is
-- "review"  = not safe to auto-ship; hold for manual or deterministic follow-up
-- "reject"  = do not ship
-
-You are NOT being asked to forecast the market. You are acting as a strict,
-conservative coherence and risk reviewer.
+You are advisory only.
 
 ----------------------------------------------------------------
-HOW TO REVIEW CANDIDATES
+REVIEW PRINCIPLES
 ----------------------------------------------------------------
 
-Review each candidate in this order:
-
-1. Mechanical coherence
-Reject if the plan is internally inconsistent or malformed.
-Examples:
-- stop is on the wrong side of entry
-- target is on the wrong side of entry
-- entry zone conflicts with posture
-- time_exit is missing or nonsensical
-- expression conflicts with posture
-
-2. Trade-shape sanity
-Reject or review if the plan has obviously weak structure from the provided data.
-Examples:
-- downside is too large relative to target
-- vol_z is extreme for the stated holding window
-- drawdown / RSI / MACD / ret20d materially conflict with the posture and plan
-- the setup looks too fragile for a conservative advisory system
-
-3. Durable-knowledge risk screen
-Use only durable, non-current market knowledge.
-Allowed examples:
-- sector/industry is typically too gap-prone for this style of plan
-- security type is structurally noisy or regime-sensitive
-- the plan shape is usually unsuitable for names with this profile
-Do NOT use current news, current earnings results, rumors, or post-cutoff facts.
-
-4. Missing-context rule
-If the candidate might be valid but essential context is missing, use "review".
-Do not approve borderline cases.
-
-----------------------------------------------------------------
-SPECIAL RULE FOR MULTI-ENGINE CANDIDATES
-----------------------------------------------------------------
-
-MEF ranks candidates using three independent deterministic engines:
-
-- **trend** — rewards continuation/breakout setups (above SMAs, rising
-  slopes, sector leadership).
-- **mean_reversion** — rewards oversold bounces (RSI < 40, 5-15% below
-  SMA50, return_5d ≥ 0 = stabilizing).
-- **value** — rewards cheap + durable names (low PE, positive FCF,
-  modest-positive 252d trend).
-
-Each candidate line shows `engines=[engine_name=score ...]` listing
-which engines picked this symbol and at what conviction. Engines
-agreeing (≥2 engines named) is a STRONG signal — you should weigh
-this toward approve if the plan is coherent. Engines disagreeing is
-CONTEXT, not a rejection — each engine's best pick may legitimately
-not interest the others (e.g., an oversold-bouncing stock is
-mean-rev territory but not trend territory, and that's by design).
-
-When you write the synthesis block, prefer names with multiple engine
-agreement. When engines disagree, prefer the engine with higher
-absolute conviction unless the draft plan has a specific problem.
+1. **Be selective.** Use a high bar for approval. Do not approve a
+   candidate unless the case is coherent, supported, and timely enough
+   to justify consideration now.
+2. **Judge only the provided evidence.** Evaluate the candidate only
+   from the structured inputs supplied in this prompt. Do not assume
+   access to outside news, filings, fundamentals, or macro information
+   unless explicitly included.
+3. **Evaluate fit to the intended setup.** Judge the candidate against
+   its named posture (see glossary below), not against a different
+   strategy you think might fit better.
+4. **Do not confuse a good company with a good opportunity now.** A
+   stock may be solid in general but still fail to justify action at
+   the present time.
+5. **Focus on coherence.** Check whether the features, posture, plan,
+   and conclusion actually support one another. Flag contradictions,
+   weak links, or missing support.
+6. **Treat hazard flags as already partially priced.** The ranker has
+   already subtracted a hazard penalty from raw conviction (shown per
+   candidate as ``hazard_penalty_total`` and ``hazard_flags``). Do NOT
+   re-penalize listed hazards by default. Only elevate a listed hazard
+   if it still appears materially underweighted or meaningfully
+   weakens the case despite already being priced.
+7. **Use uncertainty honestly.** If the candidate has some merit but
+   the case is not strong enough to ship automatically, use
+   **review** rather than stretching to approve or collapsing to reject.
+8. **Do not force coverage.** It is normal to approve none.
+9. **Judge candidates independently.** This is a per-candidate review
+   task, not a synthesis or portfolio-construction task. Do not
+   produce an ordered top-pick array or cross-candidate ranking.
 
 ----------------------------------------------------------------
-SPECIAL RULE FOR PULLBACK SETUPS
+POSTURE GLOSSARY AND SPECIAL HANDLING
 ----------------------------------------------------------------
 
-When a candidate has pullback_setup=true, the ranker has INTENTIONALLY anchored
-the entry zone below the current price because the stock closed at or very near
-its recent peak. The entry zone is a resting-limit price that fills only on a
-pullback — the gap between current close and entry_high is by design.
+**bullish**
+Trend/continuation long setup. Should usually be supported by
+constructive trend, positive momentum, and favorable relative strength.
+Does not need to look cheap. Downgrade if momentum is fading, trend
+support is weak, or the evidence conflicts with a continuation thesis.
 
-On a pullback_setup=true candidate:
+**value_quality**
+Long setup based on reasonable valuation, durability, and acceptable
+technical condition. Does not require strong momentum, but should
+still look investable now rather than merely "good in theory."
+Downgrade if the value case is unsupported, the stock appears weak for
+valid reasons, or the setup lacks a compelling present entry.
 
-- Do NOT flag "current price exceeds entry range" as an issue. That gap is the
-  feature, not a bug.
-- When judging risk/reward, compute it from the midpoint of the entry zone,
-  NOT from current close. The stop/target are sized against the pullback entry,
-  not against today's print.
-- Everything else (trade-shape sanity, durable-knowledge risk, mechanical
-  coherence) still applies normally.
+**oversold_bouncing**
+Short-term rebound / mean-reversion long setup after recent weakness.
+Some technical damage is expected, but there should be at least some
+sign of stabilization or reduced downside pressure. Downgrade if the
+stock still appears to be in active breakdown or if the case rests
+only on the fact that it has fallen.
 
-If a pullback setup is otherwise coherent, approve it.
+**range_bound**
+Non-trending setup where the stock appears to be trading within a
+range rather than showing strong directional edge. Weaker than a clean
+trend or clean rebound and usually requires tighter timing discipline.
+Downgrade if the evidence does not clearly support a range-bound
+opportunity or if the setup looks directionless without a favorable
+entry.
+
+**bearish_caution**
+Weak or fragile setup where the stock shows concerning structure and
+should not be treated as a normal long candidate. Cautionary by
+nature. Unless the provided plan explicitly justifies why it still
+deserves consideration, this posture should usually lean review or
+reject, not approve.
+
+**no_edge**
+No meaningful setup is present based on the supplied evidence.
+Generally means the candidate does not show a sufficiently attractive
+directional or tactical case at this time. Candidates with this
+posture should typically be rejected unless the prompt explicitly
+provides unusual supporting context.
+
+**Pullback setups**
+If a candidate is explicitly marked as ``pullback_setup=true``, a
+current price above the preferred entry zone is NOT by itself a
+mechanical error. The gap between current price and preferred entry
+may be intentional and part of the setup design. Judge whether the
+pullback logic is coherent and whether waiting for a better entry is
+sensible; do not reject solely because the candidate has not yet
+reached the preferred entry zone.
+
+**Option candidates**
+If option candidates are included, evaluate them using the same basic
+logic: coherence of thesis, timing, risk, and attractiveness of the
+setup based on the provided evidence. Do not assume options-specific
+approval or rejection rules unless they are explicitly provided
+elsewhere in the prompt.
+
+**General rule:** Evaluate each candidate against its intended
+posture, not against a different strategy. If the supplied evidence
+materially conflicts with the named posture, treat that as a negative.
 
 ----------------------------------------------------------------
-SPECIAL RULE FOR OPTION CANDIDATES
+DECISION CATEGORIES
 ----------------------------------------------------------------
 
-If asset_kind = "option" OR the expression uses options, do NOT try to judge
-whether the strike/expiry is optimal.
+Use exactly one disposition per candidate:
 
-Instead:
-- review the UNDERLYING thesis first
-- ask whether the stock/ETF setup is coherent enough to justify an options
-  expression at all
-- if the underlying thesis is weak, fragile, or incoherent, use "reject" or
-  "review"
-- only use "approve" if the underlying setup is coherent and nothing in the
-  provided option fields is obviously malformed
+- **approve** — strong enough to be presented as a live recommendation now
+- **review**  — shows merit and may deserve human inspection, but
+                confidence is not high enough to present it automatically
+- **reject**  — not sufficiently compelling, coherent, or timely to
+                advance based on the provided evidence
 
-For option candidates:
-- if option details are clearly incoherent, use issue_type = "options_structure"
-- if option details are merely incomplete, use "review" with
-  issue_type = "missing_context"
+Decision standard:
+- Use **approve** sparingly.
+- Use **review** for borderline but still interesting cases.
+- Use **reject** for weak, unclear, contradictory, or unconvincing cases.
 
 ----------------------------------------------------------------
-DECISION STANDARD
+PER-CANDIDATE OUTPUT
 ----------------------------------------------------------------
 
-For EACH candidate return exactly one of:
+For each candidate, emit an entry with these fields (the transport is
+JSON — see schema at the bottom):
 
-- decision: "approve"
-  Use only when the plan is internally coherent, conservatively reasonable,
-  and not obviously at odds with the provided metrics plus durable knowledge.
+- **symbol** — the ticker
+- **candidate_id** — the candidate_id value from the input line
+- **decision** — one of approve / review / reject
+- **summary** — 1–2 sentences stating the core reason for the decision
+- **strengths** — 1–3 short bullets describing what supports the case
+- **concerns** — 1–3 short bullets describing what weakens the case
+- **key_judgment** — one short sentence answering: why does this
+  candidate deserve approval, review, or rejection right now?
 
-- decision: "review"
-  Use when the idea is not clearly broken, but is too uncertain, incomplete,
-  fragile, or borderline to auto-ship.
-
-- decision: "reject"
-  Use when the plan is malformed, structurally weak, or clearly outside the
-  comfort zone of a conservative advisory system.
-
-Allowed issue_type values:
-- "none"
-- "mechanical"
-- "risk_shape"
-- "volatility_mismatch"
-- "posture_mismatch"
-- "asset_structure"
-- "options_structure"
-- "missing_context"
-
-Reason rules:
-- one sentence only
-- <= 160 characters
-- concrete, not vague
-- no suggestions, no alternatives, no caveats
+Additional rules for explanations:
+- Keep explanations grounded in the provided inputs.
+- Be concrete and concise.
+- Do not invent missing facts.
+- If citing a hazard flag, explain why it still matters **despite
+  already being priced**.
+- If using **review**, make clear what prevented approval.
+- If using **reject**, make clear whether the issue is weak evidence,
+  poor timing, internal inconsistency, unattractive risk/reward, or
+  lack of compelling support.
 
 ----------------------------------------------------------------
 RULES
@@ -201,7 +194,8 @@ RULES
 - Do NOT browse.
 - Do NOT change prices, posture, conviction, or plan values.
 - Do NOT recommend edits.
-- Do NOT approve "maybe" cases; use "review" or "reject".
+- Do NOT produce a cross-candidate ranking or top-pick ordering.
+- Do NOT approve "maybe" cases; use **review** or **reject**.
 - Be willing to approve none.
 
 Return JSON only, matching exactly this schema:
@@ -212,19 +206,13 @@ Return JSON only, matching exactly this schema:
       "candidate_id": "<ID>",
       "symbol": "<SYM>",
       "decision": "approve" | "review" | "reject",
-      "issue_type": "none" | "mechanical" | "risk_shape" | "volatility_mismatch" | "posture_mismatch" | "asset_structure" | "options_structure" | "missing_context",
-      "reason": "<one sentence>"
+      "summary": "<one to two sentences>",
+      "strengths": ["<bullet>", "..."],
+      "concerns":  ["<bullet>", "..."],
+      "key_judgment": "<one sentence>"
     }}
-  ],
-  "synthesis": ["<SYM1>", "<SYM2>", "..."]
+  ]
 }}
-
-The `synthesis` array is your ordered top picks across all engines —
-the names you'd actually ship if MEF sent one email. Include up to
-{max_new_ideas} symbols. Order by your combined conviction (engine
-agreement + plan quality + risk-shape). Only include symbols you
-listed as "approve" in reviews. Empty array means "no new trades
-today" — a valid output on weak days.
 
 Context for this run:
 as_of_date: {as_of_date}
@@ -239,20 +227,26 @@ Candidates:
 def render_candidates_block(candidates: list[dict[str, Any]]) -> str:
     """Render the per-candidate feature block for the prompt.
 
-    One line per candidate. Includes the candidate_id so the LLM's
-    response can be matched back to the source row even if it reorders
-    or drops symbols.
+    One line per candidate. Includes candidate_id so the LLM's response
+    can be matched back to the source row even if it reorders or drops
+    symbols. Hazard overlay is rendered explicitly so the LLM can see
+    what the ranker already priced.
     """
     lines: list[str] = []
     for c in candidates:
         fx = c.get("features", {})
+        hazard_flags = c.get("hazard_flags") or []
+        hazard_flags_str = ",".join(hazard_flags) if hazard_flags else "none"
         lines.append(
             f"- candidate_id={c.get('candidate_id', '?')} "
             f"symbol={c['symbol']} ({c['asset_kind']}) "
-            f"posture={c['posture']} conviction={c['conviction_score']:.2f} "
+            f"posture={c['posture']} "
+            f"conviction={c['conviction_score']:.2f} "
+            f"(raw={_fmt(c.get('raw_conviction'), '{:.2f}')} "
+            f"− hazard={_fmt(c.get('hazard_penalty_total'), '{:.2f}')}) "
+            f"hazard_flags=[{hazard_flags_str}] "
             f"pullback_setup={str(bool(c.get('needs_pullback'))).lower()} "
             f"days_to_earnings={c.get('days_to_earnings') if c.get('days_to_earnings') is not None else 'n/a'} "
-            f"engines=[{c.get('engine_scores_str', 'n/a')}] "
             f"close={_fmt(fx.get('close'), '{:.2f}')} "
             f"ret5d={_fmt_pct(fx.get('return_5d'))} "
             f"ret20d={_fmt_pct(fx.get('return_20d'))} "
@@ -283,15 +277,12 @@ def build_gate_prompt(
     as_of_date: str,
     spy_return_20d: float | None,
     spy_return_63d: float | None,
-    max_new_ideas: int = 5,
 ) -> str:
     return GATE_PROMPT_TEMPLATE.format(
-        n_candidates=len(candidates),
         as_of_date=as_of_date,
         spy_ret20=_fmt_pct(spy_return_20d) or "n/a",
         spy_ret63=_fmt_pct(spy_return_63d) or "n/a",
         candidates_block=render_candidates_block(candidates),
-        max_new_ideas=max_new_ideas,
     )
 
 

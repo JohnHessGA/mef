@@ -58,8 +58,12 @@ New ideas (3):
      Sell above:      $140.62
      Suggested hold:  through 2026-06-16
      Per 100 shares:  potential +$1,278.00 · risk $1,278.00 · R:R 1.00:1
-     Reasoning:       Value-quality setup with strong metrics across all
-                      timeframes; low vol; balanced risk/reward.
+     Summary:         Value-quality setup with coherent metrics across timeframes.
+     Strengths:       - constructive RS vs SPY over 63d
+                      - low realized vol suits value hold window
+     Concerns:        - 20d return softening
+                      - no catalyst visible in supplied features
+     Judgment:        Coherent now and priced reasonably — approve.
   2. JCI ($139.46) · high — bullish — buy_shares  [engine: trend]  📅 earnings in 16d
      Rec ID:          R-000073
      Plan:            Buy under $141, sell near $151, cut at $130. Hold up to 30 days.
@@ -81,8 +85,13 @@ Held for review (2) — LLM flagged these for human attention, not auto-ship:
      Sell above:      $141.68
      Suggested hold:  through 2026-05-17
      Per 100 shares:  potential +$802.00 · risk $1,176.00 · R:R 0.68:1
-     Reasoning:       Pullback setup is mechanically coherent, but tight
-                      R:R with flat MACD appears fragile.
+     Summary:         Pullback setup is mechanically coherent, but tight R:R
+                      with flat momentum looks fragile right now.
+     Strengths:       - two engines agree (trend + value)
+                      - clean pullback anchor below current close
+     Concerns:        - MACD near zero lacks trend support
+                      - R:R below 1:1 makes the case soft
+     Judgment:        Worth a human look, but not strong enough to auto-ship.
   ...
 
 Engine views (raw per-engine top picks):
@@ -119,7 +128,7 @@ Most-frequent first.
 | `mef recommendations [--state X]`        | List recommendations by lifecycle state (see [Reading recommendations](#reading-recommendations)) |
 | `mef show <rec-uid>`                     | Full detail on one rec — gate decision, paper-score outcome, P&L curve                          |
 | `mef report --when premarket`            | Re-render the most recent pre-market email body without sending                                 |
-| `mef rejections`                         | Audit table of every LLM-rejected candidate (with reason + issue_type)                          |
+| `mef rejections`                         | Audit table of every LLM-rejected candidate (with summary + concerns)                           |
 | `mef dismiss <rec-uid> [--note "..."]`   | Mark a `proposed` rec as not-going-to-implement                                                 |
 | `mef tag <rec-uid> --provenance ...`     | Override the inferred provenance on an active rec (see [Provenance](#provenance))               |
 | `mef link-trade <rec-uid> --qty ...`     | Record an actual buy/sell on a scored rec (see [Linking real trades](#linking-real-trades))     |
@@ -168,7 +177,7 @@ mef show R-000032
 `mef show` surfaces (when populated):
 
 - Plan: posture, expression, entry zone, stop, target, time-exit, conviction
-- **LLM gate**: decision (approve / review / reject / unavailable), `issue_type`, free-text reason, ship reasoning
+- **LLM gate**: decision (approve / review / reject / unavailable), 1–2 sentence `summary`, 1–3 `strengths` bullets, 1–3 `concerns` bullets, one-sentence `key_judgment`, and the derived ship reasoning
 - **Provenance**: `mef_attributed` / `pre_existing` / `independent` (set by activator or `mef tag`)
 - Matched holding (when active or closed)
 - **Paper-trade outcome**: synthetic forward-walked outcome using close-of-run-day entry. Populates after `time_exit` elapses.
@@ -181,8 +190,8 @@ mef show R-000032
 
 Per the LLM gate's 3-way disposition (see `mef_llm_gate.md`):
 
-- **`approve`** → ships in the email's "New ideas" section
-- **`review`** → ships in the email's separate **"Held for review"** section with the LLM's one-sentence reason so you can decide whether to act manually. Also saved as a `proposed` recommendation.
+- **`approve`** → ships in the email's "New ideas" section with full LLM rationale
+- **`review`** → ships in the email's separate **"Held for review"** section with the same full LLM rationale (summary + strengths + concerns + judgment) so you can decide whether to act manually. Also saved as a `proposed` recommendation.
 - **`reject`** → not saved as a recommendation; lives only on `mef.candidate` for audit
 
 To see review-flagged ideas from the latest run:
@@ -197,9 +206,9 @@ Then for any one that interests you:
 mef show R-000032
 ```
 
-You'll see `decision: review` and the LLM's `issue_type` (most often
-`risk_shape`, `volatility_mismatch`, or `posture_mismatch`) plus a
-one-sentence reason. From there:
+You'll see `decision: review` and the LLM's rich rationale — a 1–2
+sentence `summary`, up to 3 `strengths` bullets, up to 3 `concerns`
+bullets, and a one-sentence `key_judgment`. From there:
 
 - If you decide to act on it anyway, you simply buy it. The next CSV
   import will auto-activate it the same way it would for an approved
@@ -291,12 +300,13 @@ Every **month** (when paper/realized samples accumulate), spot-check:
 
 ```bash
 mef recommendations --all --since 2026-04-01     # what shipped
-mef rejections --since 2026-04-01                # what was rejected (with issue_type)
+mef rejections --since 2026-04-01                # what was rejected (with summary + concerns)
 ```
 
-Look for patterns: are the LLM's `risk_shape` rejections actually
-underperforming? Is one `issue_type` over-represented (a sign the
-prompt could be tightened)?
+Look for patterns: are the LLM's rejections actually underperforming?
+Are the same themes (timing, fragility, hazard re-raising) showing up
+repeatedly in the `concerns` bullets — a sign the prompt could be
+tightened?
 
 Every **quarter** (parked until ~3 months of data exists, milestone 17):
 

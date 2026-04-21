@@ -40,7 +40,10 @@ _RECS_FOR_RUN = """
            r.stop_level, r.target_level, r.time_exit_date,
            c.proposed_entry_zone,
            c.llm_gate_decision,
-           c.llm_gate_issue_type,
+           c.llm_gate_summary,
+           c.llm_gate_strengths,
+           c.llm_gate_concerns,
+           c.llm_gate_key_judgment,
            c.feature_json,
            r.reasoning_summary
       FROM mef.recommendation r
@@ -108,7 +111,10 @@ def _build_idea(rec: dict[str, Any]) -> dict[str, Any]:
         "target":             rec.get("target_level"),
         "time_exit":          rec.get("time_exit_date"),
         "llm_gate":           rec.get("llm_gate_decision") or "unavailable",
-        "issue_type":         rec.get("llm_gate_issue_type"),
+        "llm_summary":        rec.get("llm_gate_summary"),
+        "llm_strengths":      list(rec.get("llm_gate_strengths") or []),
+        "llm_concerns":       list(rec.get("llm_gate_concerns") or []),
+        "llm_key_judgment":   rec.get("llm_gate_key_judgment"),
         "reasoning_summary":  rec.get("reasoning_summary"),
         "needs_pullback":     needs_pullback,
         "current_price":      close,

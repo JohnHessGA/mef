@@ -1,14 +1,14 @@
 # MEF LLM Gate
 
-Version: 2026-04-21
+Version: 2026-04-21 (v3 rewrite)
 Status: Active design — update when the prompt or disposition vocabulary changes.
 
 The LLM is a **gate**, not an idea generator. The deterministic ranker
 decides what's a candidate; the LLM decides whether each candidate is
-coherent enough to ship.
+worth considering now.
 
-This doc captures the gate's philosophy, the v2 prompt structure, the
-disposition vocabulary, the `issue_type` taxonomy, the validation
+This doc captures the gate's philosophy, the v3 prompt structure, the
+disposition vocabulary, the rich per-candidate output, the validation
 contract, and how to iterate on it.
 
 ---
@@ -19,10 +19,10 @@ The deterministic ranker has no understanding of the world — it scores
 features, applies thresholds, and emits the top N. That's enough for a
 first pass but it doesn't catch:
 
-- **Mechanical errors** (stop above entry, expression mismatched to posture)
-- **Trade-shape weaknesses** (RR ratio that looks fine in isolation but is wrong for this kind of name)
-- **Regime mismatches** (bullish setup in a sharply-down market)
-- **Durable-knowledge red flags** (gap-prone biotechs, regime-sensitive small-caps)
+- **Internal incoherence** (features, posture, and plan not supporting one another)
+- **Trade-shape weaknesses** (a ratio that looks fine in isolation but is wrong for this style of name)
+- **Timing / present attractiveness** (a fine company with a poor entry right now)
+- **Hidden concerns the ranker didn't price** (under-priced hazard, fragile thesis)
 
 A conservative LLM reviewer fills that gap **without generating new
 ideas of its own**. The boundary is strict: the LLM never changes
@@ -42,10 +42,10 @@ The gate returns one of:
 
 | Decision      | Meaning                                                            | Effect                                                                 |
 |---------------|--------------------------------------------------------------------|------------------------------------------------------------------------|
-| `approve`     | Safe to ship as-is.                                                | Becomes a `mef.recommendation` row. **Appears in the email.**          |
-| `review`      | Not safe to auto-ship, but not clearly wrong.                      | Becomes a `mef.recommendation` row. **Withheld from the email.** Visible via `mef recommendations --state proposed`. Auto-activates on a matching CSV import. |
-| `reject`     | Malformed, structurally weak, or outside the system's comfort zone. | **Does not** become a recommendation. Audit trail lives on `mef.candidate.llm_gate_decision/reason/issue_type`. |
-| `unavailable` | (Pseudo-disposition.) LLM call failed; this is a fallback only.    | Becomes a recommendation. **Appears in the email** with a "not reviewed by LLM" warning so an LLM outage doesn't silence MEF entirely. |
+| `approve`     | Strong enough to present as a live recommendation now.             | Becomes a `mef.recommendation` row. **Appears in the "New ideas" email section.** |
+| `review`      | Shows merit, deserves human inspection, not confident enough to auto-ship. | Becomes a `mef.recommendation` row. **Appears in the "Held for review" email section** with the full LLM rationale. Auto-activates on a matching CSV import. |
+| `reject`      | Not sufficiently compelling, coherent, or timely.                  | **Does not** become a recommendation. Audit trail lives on `mef.candidate` (decision + rich output columns). |
+| `unavailable` | (Pseudo-disposition.) LLM call failed; fallback only.              | Becomes a recommendation. **Appears in the "New ideas" email section** with a "not reviewed by LLM" warning so an LLM outage doesn't silence MEF entirely. |
 
 The earlier binary (approve/reject) collapsed the "borderline" case
 into one or the other; the 3-way preserves it as its own thing. That
@@ -55,90 +55,173 @@ distributions tells us whether the LLM's caution is calibrated.
 
 ---
 
-## The `issue_type` taxonomy
+## Per-candidate rich output
 
-Every disposition carries an `issue_type` so audits can cluster
-decisions by reason class without reading free text.
+As of 2026-04-21, each decision carries a structured explanation
+instead of a single-sentence reason. The fields, stored on
+`mef.candidate`:
 
-| `issue_type`            | When to use it                                                                  |
-|-------------------------|---------------------------------------------------------------------------------|
-| `none`                  | Used on `approve` decisions; no specific concern.                               |
-| `mechanical`            | Plan is internally inconsistent (stop above entry, time_exit missing, expression conflicts with posture). |
-| `risk_shape`            | Downside too large vs. target; entry near a stretched move; setup too fragile for conservative advisory. |
-| `volatility_mismatch`   | `vol_z` extreme for the holding window; recent realized vol unsuitable.         |
-| `posture_mismatch`      | Bullish setup in clearly bearish broad-market context (or vice versa).          |
-| `asset_structure`       | Sector/industry typically too gap-prone or too noisy for this style of plan.    |
-| `options_structure`     | Reserved for future option candidates (currently unused — MEF v1 emits stocks/ETFs only). |
-| `missing_context`       | Idea might be valid but essential context isn't visible to the LLM. **The conservative default** — used when the LLM lacks signal to decide. |
+| Column                   | Contents                                                  |
+|--------------------------|-----------------------------------------------------------|
+| `llm_gate_decision`      | `approve` / `review` / `reject` / `unavailable`           |
+| `llm_gate_summary`       | 1–2 sentence rationale for the decision                   |
+| `llm_gate_strengths`     | Short bullets describing what supports the case (up to 3) |
+| `llm_gate_concerns`      | Short bullets describing what weakens the case (up to 3)  |
+| `llm_gate_key_judgment`  | One-sentence bottom line: why approve / review / reject **right now** |
 
-The full enum lives in `src/mef/llm/prompts.py :: ALLOWED_ISSUE_TYPES`
-and is enforced by:
+### Deprecated fields (kept for migration compatibility)
 
-- A SQL CHECK constraint on `mef.candidate.llm_gate_issue_type`
-  (migration `005_gate_review_disposition.sql`)
-- Server-side coercion in `llm/gate.py :: _coerce_issue_type`:
-  - Unknown value on an `approve` → `none` (most permissive)
-  - Unknown value on a `review` or `reject` → `missing_context` (most conservative — flagged as audit-worthy)
+| Column                                   | Status                                                  |
+|------------------------------------------|---------------------------------------------------------|
+| `mef.candidate.llm_gate_reason`          | DEPRECATED — superseded by `llm_gate_summary`. Populated on historical rows only. Not written by new code. |
+| `mef.candidate.llm_gate_issue_type`      | DEPRECATED — superseded by `llm_gate_concerns`. The 8-value enum classifier is no longer populated; the column's CHECK constraint already permits NULL. |
+| `mef.recommendation.llm_review_color`    | DEPRECATED — never actually held a color. `mef.candidate` is the source of truth for gate output; recommendations read via FK join. Not written by new code. |
+| `mef.recommendation.llm_review_concern`  | DEPRECATED — same reason. Not written by new code. |
+
+Schema comments on each of these columns reflect the deprecation
+(`\d+ mef.candidate` / `\d+ mef.recommendation` shows them).
 
 ---
 
 ## The prompt
 
 Lives in `src/mef/llm/prompts.py :: GATE_PROMPT_TEMPLATE`.
+Version: **v3 (2026-04-21)**. Model: **Opus 4.7**
+(`DEFAULT_MODEL = "claude-opus-4-7"` in `src/mef/llm/client.py`).
 
-Key structural choices:
+### Role framing
 
-1. **Strict review order** — mechanical → trade-shape → durable-knowledge → missing-context. Forces the LLM to fail on coherence before reasoning about context, which keeps rejections explainable.
+> *You are a disciplined, conservative reviewer of proposed investment
+> candidates. Your task is to determine whether each candidate should be
+> approved, held for review, or rejected based only on the information
+> provided. Your job is not to generate new ideas, rank a top-pick
+> list, or force approvals. It is completely acceptable to return no
+> approved ideas in a given run.*
 
-2. **No browsing, no current news** — explicitly forbidden. The LLM judges only what's in the candidate block plus durable, non-current knowledge. Keeps the gate reproducible and prevents drift driven by what the LLM happens to "know" today.
+### Nine review principles
 
-3. **"Approve none" is a valid response** — the prompt explicitly says it's healthy for the gate to approve none on a weak day. Removes the implicit pressure to produce something.
+1. **Be selective.** High bar for approval.
+2. **Judge only the provided evidence.** No browsing, no news, no post-cutoff facts.
+3. **Evaluate fit to the intended setup.** Grade against the named posture (see glossary).
+4. **Do not confuse a good company with a good opportunity now.** The most load-bearing line.
+5. **Focus on coherence.** Features, posture, plan, conclusion should support one another.
+6. **Treat hazard flags as already priced.** The ranker has already subtracted `hazard_penalty_total`; don't double-penalize.
+7. **Use uncertainty honestly.** Borderline → `review`, never stretch to approve.
+8. **Do not force coverage.** Approve none is normal.
+9. **Judge candidates independently.** No cross-candidate ranking, no top-pick array.
 
-4. **Borderline → review, never approve** — *"Do NOT approve maybe cases; use review or reject."* This rule is what gives the 3-way disposition its discriminating value.
+### Posture glossary
 
-5. **Options handling future-proofed** — the prompt has a section for option candidates already, but MEF v1 only emits stocks/ETFs so it never fires. When options arrive, no prompt change needed.
+The prompt defines all six postures the ranker can emit:
 
-6. **Pullback-setup special rule** (added 2026-04-21) — each candidate line carries a `pullback_setup=true|false` flag. When true, the ranker has intentionally anchored the entry zone *below* the current close because the stock is at/near its recent peak. The prompt has a dedicated SPECIAL RULE section instructing the LLM to NOT flag the current-price-vs-entry-range gap as a `risk_shape` issue on pullback setups, and to compute risk/reward from the entry-zone midpoint rather than current close. Prevents a false-positive review verdict that surfaced the first time the pullback feature landed (AEP on 2026-04-20 run DR-000017).
+- **bullish** — trend/continuation, expects positive momentum.
+- **value_quality** — cheap + durable, doesn't need strong momentum, but must be investable now.
+- **oversold_bouncing** — short-term rebound after recent weakness; some stabilization required.
+- **range_bound** — non-trending; tighter timing discipline required.
+- **bearish_caution** — fragile structure; should usually lean review/reject.
+- **no_edge** — no meaningful setup; should typically be rejected. Its arrival at the gate signals that upstream narrowing may need tightening.
 
-7. **Multi-engine aware** (added 2026-04-21) — each candidate line shows per-engine conviction scores (`engines=[trend=0.82 value=0.71 ...]`). A new SPECIAL RULE FOR MULTI-ENGINE CANDIDATES section tells the LLM that engine agreement is signal and disagreement is context (not a rejection — each engine's best pick may legitimately not interest the others). Output schema adds a `synthesis` array — the LLM's ordered top-picks across all engines, bounded by `max_new_ideas`. Only symbols it approved are valid in synthesis; the parser drops any that disagree. Empty synthesis is valid ("no new trades today").
+Plus two handling rules:
 
-8. **JSON-only output** — strict output schema with `reviews` array and `synthesis` array (empty when the prompt is single-engine or when the LLM declines to synthesize).
+- **Pullback setups** — when `pullback_setup=true`, a current price above the entry zone is the feature, not a mechanical error.
+- **Option candidates** — use the same coherence logic; no options-specific rules in v1.
 
-The candidate block is rendered by `render_candidates_block()` and
-includes the `candidate_id` (e.g. `C-002881`) so the LLM's response
-can be matched back even if it reorders or drops symbols. The block
-surfaces the full set of signals the ranker weighs: `pullback_setup`,
-`days_to_earnings` (integer, days from bar_date to
-`next_earnings_date`; `n/a` when no upcoming announcement is on file),
-close, `return_5d` / `return_20d` / `return_63d` / `return_252d`,
-RSI14, MACD histogram, SMA20 slope, `rv20/rv63` vol ratio,
-`rs_vs_spy_63d`, `rs_vs_qqq_63d`, drawdown, `vol_z`, sector, and the
-draft plan. Keeping the LLM's view aligned with the ranker's scoring
-inputs stops the LLM from commenting on a strictly smaller feature
-set than the one that actually produced the conviction score.
+### Hazard overlay is visible to the LLM
 
-Note that ideas with `days_to_earnings ≤ 5` (or ≤ 10 on pullback
-setups) never reach the gate — the ranker vetos them to `no_edge`
-before emission. The LLM only sees `days_to_earnings` values on ideas
-that cleared the hard veto, so a value of 12 or 18 is the expected
-range when this field carries a number.
+Each candidate line now shows the ranker's hazard decomposition:
 
----
+```
+conviction=0.82 (raw=0.88 − hazard=0.06) hazard_flags=[earn_prox:6-10d]
+```
 
-## What the gate is NOT allowed to do
+The prompt tells the LLM to treat these as already priced — only
+elevate a listed hazard if it still appears materially under-priced.
+This kills the failure mode observed on 2026-04-21 where the LLM
+re-raised "earnings in 13 days" as a fresh concern on BMY even though
+the ranker had already docked its conviction by 0.055 for exactly
+that.
 
-These are hard rules in the prompt:
+### Decision standard
+
+- **approve** — strong enough to present as a live recommendation now
+- **review**  — shows merit, worth human inspection, not confident enough to auto-ship
+- **reject**  — not sufficiently compelling, coherent, or timely
+
+Plus: *"Use approve sparingly. Use review for borderline but still
+interesting cases. Use reject for weak, unclear, contradictory, or
+unconvincing cases."*
+
+### What the gate is NOT allowed to do
 
 - ❌ Invent current news, earnings results, or post-cutoff events
 - ❌ Browse or claim to have searched
-- ❌ Change the entry price, posture, conviction, stop, target, or time-exit
-- ❌ Suggest an alternative plan
+- ❌ Change entry, posture, conviction, stop, target, or time-exit
+- ❌ Produce a cross-candidate ranking or top-pick ordering
 - ❌ Approve a "maybe" case (must be `review` or `reject`)
 
-If the LLM ignores these rules, the response parser still works
-(unknown fields are dropped) but the issue_type coercion catches the
-rest. If you see persistent rule violations in `mef.llm_trace`, that's
-a signal to tighten the prompt wording.
+### JSON output schema
+
+```json
+{
+  "reviews": [
+    {
+      "candidate_id": "C-015041",
+      "symbol": "AEP",
+      "decision": "approve",
+      "summary": "Coherent trend continuation with supportive momentum.",
+      "strengths": ["trend support above SMAs", "RS vs SPY +22%"],
+      "concerns": ["earnings in 19 days"],
+      "key_judgment": "Worth approving — plan is clean and timing is now."
+    }
+  ]
+}
+```
+
+---
+
+## How the prompt-volume ceiling works
+
+The ranker narrows the ~320 universe down to **at most 9 candidates**
+before the LLM sees anything. The ceiling is set by:
+
+| Knob                       | Location                       | Value (as of 2026-04-21) |
+|----------------------------|--------------------------------|--------------------------|
+| `conviction_threshold`     | `config/mef.yaml :: ranker`    | 0.5                      |
+| `top_n_per_engine`         | `config/mef.yaml :: ranker`    | 3                        |
+
+Max candidates to LLM = `top_n_per_engine × N engines` = 3 × 3 = **9**,
+deduplicated by symbol. When engines agree on a name, the effective
+count is lower.
+
+The former `max_new_ideas_per_run` knob was removed on 2026-04-21 —
+the ranker's per-engine cap + the LLM's high approve bar together
+deliver selectivity without an artificial post-LLM truncation.
+
+---
+
+## What changed on 2026-04-21 (v3 rewrite)
+
+Driven by a run comparison on 2026-04-21 that showed the LLM flipping
+approve ↔ review dispositions on bit-identical inputs two minutes
+apart (DR-000033 vs DR-000034). Three symbols (BMY / MRK / PFE) got
+downgraded approve → review between the back-to-back runs, even though
+the ranker produced identical features and identical plans. The
+sampling-variance source was compounded by prompt vagueness around
+"materially conflicts" and a conservative-bias clause without
+thresholds.
+
+Changes:
+
+1. **Model** — haiku → **Opus 4.7**. Stronger judgment on nuanced rubric calls.
+2. **Role framing** — "disciplined reviewer of investment candidates," thesis-centric language.
+3. **Nine explicit review principles** with the "good company ≠ good opportunity now" line load-bearing.
+4. **Six-posture glossary** — every ranker posture named with a specific definition.
+5. **Hazard overlay surfaced in the candidate line** — `conviction=0.82 (raw=0.88 − hazard=0.06)` plus `hazard_flags`, with prompt language telling the LLM hazards are already priced.
+6. **Rich per-candidate output** — `summary` + `strengths[]` + `concerns[]` + `key_judgment` replace the single `reason` string and `issue_type` enum.
+7. **Synthesis dropped** — no more cross-candidate top-pick ordering; the LLM judges independently per candidate.
+8. **`max_new_ideas_per_run` removed** — both from the prompt and from config.
+9. **`issue_type` deprecated** — `concerns[]` carries the signal.
+10. **Email** — new `Summary:` / `Strengths:` / `Concerns:` / `Judgment:` block (capped at 2 bullets each) renders for both new-idea and held-for-review sections. Legacy `Reasoning:` stays as a fallback for LLM-unavailable runs and historical recs.
 
 ---
 
@@ -158,56 +241,39 @@ Every gate call writes one row to `mef.llm_trace`:
 | `status`        | `ok` / `error` / `timeout`                                         |
 | `error_text`    | Set when status != ok                                              |
 
-Per-candidate dispositions are stamped on `mef.candidate`:
-
-| Column                | Contents                                                  |
-|-----------------------|-----------------------------------------------------------|
-| `llm_gate_decision`   | `approve` / `review` / `reject` / `unavailable`           |
-| `llm_gate_issue_type` | One of the 8 enum values                                  |
-| `llm_gate_reason`     | One-sentence free text from the LLM                       |
-
-To browse what the gate has been doing:
+Per-candidate dispositions are stamped on `mef.candidate` (see the
+schema table above). To browse:
 
 ```bash
-mef rejections --since 2026-04-01     # all rejects with reasons
-mef recommendations --state proposed  # everything approved-or-reviewed and waiting
-mef show R-NNNNNN                     # full per-rec detail incl. gate fields
+mef rejections --since 2026-04-01     # all rejects with rationales
+mef recommendations --state proposed  # approved + reviewed + waiting
+mef show R-NNNNNN                     # full per-rec detail incl. rich gate output
 ```
 
 ---
 
 ## How to iterate the prompt
 
-The prompt is the most-tunable surface in the gate. Iteration cycle:
-
-1. **Edit `src/mef/llm/prompts.py`.** Whole prompt body is one Python string.
-
-2. **Make sure the curly braces stay escaped.** The literal `{}` in the JSON example must remain `{{ }}` — the Python `.format()` call reads the rest as substitution slots (`{n_candidates}`, `{as_of_date}`, etc).
-
-3. **Make sure `ALLOWED_ISSUE_TYPES` and the SQL CHECK constraint stay in sync** if you change the issue_type enum. The constraint name is `candidate_llm_gate_issue_type_chk` (in `005_gate_review_disposition.sql`) — adding or removing values requires a new migration.
-
-4. **Test against today's run:**
+1. **Edit `src/mef/llm/prompts.py`.** Whole body is one Python string.
+2. **Keep the JSON example braces escaped** — `{{` `}}` stay literal; everything else is a `.format()` slot.
+3. **Test against today's run:**
    ```bash
    mef run --when premarket --dry-run
    ```
-   This exercises the full pipeline without sending. Look at the
-   summary line:
+   Look for the summary line:
    ```
    gate: available=True approve=1 review=4 reject=0 unavailable=0
    ```
-
-5. **Diff against prior runs.** Every prompt's full text is stored in `mef.llm_trace.prompt_text`, so you can correlate prompt changes with disposition shifts later.
-
-6. **Watch the audit.** Once `mef gate-audit` has signal-grade samples (~20+ settled outcomes per side), it's the authoritative judge of whether a prompt change is helping. Until then, judge by output coherence.
+4. **Diff against prior runs.** Every prompt's full text is stored in `mef.llm_trace.prompt_text`.
+5. **Watch the audit.** Once `mef gate-audit` has ≥20 settled samples per side, it becomes the authoritative judge.
 
 ### When to consider splitting the prompt
 
-The current design is one prompt with a strict review order. The
-alternative is **per-posture prompts** (one for `bullish`, one for
-`bearish_caution`, etc.), each with posture-specific evaluation
-criteria. That's more code and more maintenance — only worth it once
-audit data shows the unified prompt is systematically wrong on one
-posture and right on others.
+The v3 design is one prompt covering all six postures via glossary.
+The alternative is **per-posture prompts**, each with posture-specific
+evaluation criteria. That's more code and more maintenance — only
+worth it once audit data shows the unified prompt is systematically
+wrong on one posture and right on others.
 
 ---
 
@@ -219,8 +285,8 @@ mef gate-audit
 
 Produces a 4-column table:
 
-| Column        | Source                                      | Question it answers                       |
-|---------------|---------------------------------------------|-------------------------------------------|
+| Column        | Source                                              | Question it answers                |
+|---------------|-----------------------------------------------------|-------------------------------------|
 | Approved      | `mef.paper_score WHERE gate_decision='approve'`     | What does the LLM say "yes" to?    |
 | Review        | `mef.paper_score WHERE gate_decision='review'`      | What does the LLM say "maybe" to?  |
 | Rejected      | `mef.shadow_score` (rejects never get a rec)        | What does the LLM say "no" to?     |
@@ -235,16 +301,15 @@ sides cross `MIN_SAMPLE_FOR_SIGNAL = 20`. Below that the report says
 
 What good outcomes look like once the sample matures:
 
-- **Approved win rate > Rejected win rate** by a clear margin → gate is helping
+- **Approved win rate > Rejected win rate** → gate is helping
 - **Approved P&L/100sh > Rejected P&L/100sh** → gate is selecting better trades, not just safer-looking ones
 - **Approved vs SPY > Rejected vs SPY** → gate's calls add value above the benchmark
 
 If the comparison is roughly flat, the gate is adding cost (LLM
-latency, occasional outages) without value — and we should either
-tighten the prompt or revisit whether to keep it. If `Approved` and
-`Review` look indistinguishable, the LLM is being too cautious and
-we can promote `review` cases to `approve`. If `Review` looks like
-`Reject`, the LLM is correctly catching weak cases via review.
+latency, occasional outages) without value. If `Approved` and
+`Review` look indistinguishable, the LLM is being too cautious. If
+`Review` looks like `Reject`, the LLM is correctly catching weak
+cases via review.
 
 ---
 
@@ -253,6 +318,6 @@ we can promote `review` cases to `approve`. If `Review` looks like
 - Prompt source: `src/mef/llm/prompts.py`
 - Gate orchestration: `src/mef/llm/gate.py`
 - LLM client (Claude CLI subprocess): `src/mef/llm/client.py`
-- Migration that added 3-way + issue_type: `sql/mefdb/005_gate_review_disposition.sql`
+- Migration that added the rich-output columns: `sql/mefdb/012_gate_rich_output.sql`
 - Audit data model: `mef_audit_model.md`
 - Operations workflow: `mef_operations.md`

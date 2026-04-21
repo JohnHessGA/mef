@@ -31,7 +31,7 @@ from mef.config import load_app_config
 
 
 DEFAULT_CLI_PATH = "/home/johnh/.local/bin/claude"
-DEFAULT_MODEL = "haiku"
+DEFAULT_MODEL = "claude-opus-4-7"
 DEFAULT_TIMEOUT_S = 120
 
 # Retry-on-timeout policy (only for the `claude-cli` provider).

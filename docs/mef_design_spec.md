@@ -256,8 +256,10 @@ context but defers to it on specifics.
    - `engine_scores`: `{symbol: {engine: conviction}}` so the prompt
      can annotate per-engine agreement/disagreement.
 4. LLM gate runs once — see §10 and `mef_llm_gate.md`. Gate returns
-   per-candidate disposition AND a `synthesis` array (ordered top
-   picks across engines, bounded by `max_new_ideas_per_run`).
+   per-candidate disposition (`approve` / `review` / `reject` /
+   `unavailable`) plus structured rationale (`summary`, `strengths[]`,
+   `concerns[]`, `key_judgment`). No cross-candidate ordering: each
+   candidate is judged independently.
 5. `_insert_recommendations` creates one rec per approved/review/
    unavailable symbol with `source_engines` populated (every engine
    that picked the symbol, not just the highest-conviction one).
@@ -285,7 +287,9 @@ different philosophies surface non-overlapping picks — in the
 - draft plan: expression, entry zone, stop, target, time-exit
 
 **Sorting / emission.** Sort candidates by `conviction_score` desc.
-Apply `conviction_threshold` and `max_new_ideas_per_run` (config).
+Apply `conviction_threshold` (config) plus per-engine `top_n_per_engine`
+cap, then deduplicate by symbol. Effective ceiling to the LLM gate is
+`top_n_per_engine × N engines` = 3 × 3 = 9 candidates per run.
 "No new trades today" is the intended output on weak days.
 
 **Scoring rules** (current — will iterate). Each rule adjusts `base`
@@ -446,30 +450,41 @@ Caching lives in `mef.benchmark_snapshot` **only if** live joins prove too slow.
 
 ### 10.1 Provider
 
-- **Default:** Claude CLI — invoked as `claude -p <prompt>` on the Claude Pro subscription.
-- **Pluggable:** a `LLMProvider` interface with `generate(prompt) -> LLMResponse`. Config key `mef.llm.provider` selects which implementation. v1 ships `claude_cli`; a `anthropic_api` or other provider can be dropped in later without touching the ranker.
+- **Default:** Claude CLI — invoked as `claude -p <prompt> --model claude-opus-4-7` on the Claude Pro subscription. Default model bumped haiku → **Opus 4.7** on 2026-04-21 to improve stability of the gate's nuanced judgments (see `mef_llm_gate.md`).
+- **Pluggable:** a `LLMProvider` interface with `generate(prompt) -> LLMResponse`. Config key `mef.llm.provider` selects which implementation. v1 ships `claude_cli`; an `anthropic_api` or other provider can be dropped in later without touching the ranker.
 
 ### 10.2 Role
 
-The LLM is used **only** at step 7 of the pipeline (final review) and step 11 (reasoning text in email).
+The LLM is used **only** at step 7 of the pipeline (gate review over ranker survivors) and step 11 (rendered rationale in the email).
 
 Specifically the LLM:
 
-- Reviews the deterministic ranker's emitted candidates + supporting evidence
-- Provides a short color / context paragraph per survivor
-- Flags any candidate whose plan looks inconsistent with broader market context (the flag is informational — a human-readable concern field stored on the recommendation)
-- Produces the "short reasoning summary" that appears in the email
+- Judges each ranker survivor with a 3-way disposition (`approve` / `review` / `reject`)
+- Produces structured rationale per candidate: `summary`, `strengths[]`, `concerns[]`, `key_judgment`
+- Sees the ranker's hazard overlay explicitly (`raw_conviction`, `hazard_penalty_total`, `hazard_flags`) and is instructed not to re-raise already-priced concerns
 
 The LLM does **not**:
 
 - Propose new candidates the ranker didn't
-- Change entry / exit / invalidation prices
-- Decide whether "no new trades today" is the right answer
+- Change entry / exit / invalidation prices, posture, or conviction
+- Produce a cross-candidate ranking or top-pick ordering
+- Decide whether "no new trades today" is the right answer (it *can* approve none, but the number of approvals is never constrained)
 - Run as part of active-position re-evaluation in v1 (may change later)
 
-### 10.3 Prompt shape (v1 sketch)
+### 10.3 Prompt shape (v3, 2026-04-21 rewrite)
 
-The v1 prompt asks Claude, in plain English, whether MEF's assumptions and plans look reasonable given its broader knowledge, and requests a short context paragraph per candidate. The prompt will iterate; the first version is deliberately simple. The prompt template lives in `src/mef/llm/prompts.py` (path to be confirmed during implementation) and is versioned in git.
+The full prompt and its rationale are documented in `mef_llm_gate.md`.
+High-level: role framed as a disciplined investment-idea reviewer;
+nine review principles emphasizing selectivity, coherence, timing,
+and the "good company ≠ good opportunity now" caveat; glossary
+defining all six ranker postures (bullish, value_quality,
+oversold_bouncing, range_bound, bearish_caution, no_edge); explicit
+hazard-already-priced language; JSON-only output with
+`reviews[].{summary,strengths,concerns,key_judgment}`.
+
+Prompt template lives in `src/mef/llm/prompts.py :: GATE_PROMPT_TEMPLATE`
+and is versioned in git. Every prompt text is persisted on
+`mef.llm_trace.prompt_text` for diff-vs-outcome analysis.
 
 ### 10.4 Logging
 
@@ -565,7 +580,19 @@ Layered gating (added in migration 011):
 - `eligibility_pass` — Layer A verdict
 - `eligibility_fail_reasons` — Layer A failure reasons
 
-See `docs/mef_layered_gating.md` for the canonical semantics of each field.
+LLM gate output (added in migration 012):
+- `llm_gate_decision` — `approve` / `review` / `reject` / `unavailable`
+- `llm_gate_summary` — 1–2 sentence rationale for the decision
+- `llm_gate_strengths` — `text[]`, bullets describing what supports the case (up to 3)
+- `llm_gate_concerns` — `text[]`, bullets describing what weakens the case (up to 3)
+- `llm_gate_key_judgment` — one-sentence bottom line (why approve / review / reject **right now**)
+
+Deprecated LLM-gate fields (kept for migration compatibility only, marked via `COMMENT ON COLUMN`):
+- `llm_gate_reason` — superseded by `llm_gate_summary`
+- `llm_gate_issue_type` — superseded by `llm_gate_concerns`
+
+See `docs/mef_layered_gating.md` for the canonical semantics of the
+hazard fields, and `docs/mef_llm_gate.md` for the LLM-gate fields.
 
 ### `mef.recommendation`
 
@@ -582,8 +609,8 @@ The user-visible output of the tool. Lifecycle lives here.
 - `target_level`, `target_rule`
 - `time_exit_date`
 - `confidence`
-- `reasoning_summary` (LLM-produced in v1)
-- `llm_review_color`, `llm_review_concern`
+- `reasoning_summary` (derived from the LLM's `summary` field when present; falls back to ranker notes)
+- `llm_review_color`, `llm_review_concern` — **DEPRECATED 2026-04-21**; candidate table is the source of truth. Not written by new code. Populated on historical rows only.
 - `state` (`proposed` / `active` / `dismissed` / `expired` / `closed_win` / `closed_loss` / `closed_timeout`)
 - `state_changed_at`, `state_changed_by` (`run` / `import` / `cli`)
 - `active_match_position_uid` (FK to `position_snapshot`, nullable)
@@ -736,16 +763,21 @@ New ideas (K):  ← LLM-approved + unavailable-fallback
      Sell above:      $…
      Suggested hold:  through YYYY-MM-DD
      Per 100 shares:  potential +$… · risk $… · R:R N.NN:1
-     Reasoning:       … (one sentence; prefers LLM reason, falls back to
-                      ranker notes)
+     Summary:         LLM's 1–2 sentence rationale for the decision.
+     Strengths:       - short bullet
+                      - short bullet
+     Concerns:        - short bullet
+                      - short bullet
+     Judgment:        LLM's one-sentence bottom line: why this deserves action now.
 
  (or: "No new trades today.")
 
 Held for review (J) — LLM flagged these for human attention, not auto-ship:
   1. SYMBOL[:etf] ($price) · medium — posture — expression
      Rec ID:          R-000xxx
-     (same block as "New ideas", with pullback + price-check annotations)
-     Reasoning:       … (LLM's one-sentence review reason)
+     (same block as "New ideas", including the rich Summary/Strengths/
+     Concerns/Judgment block — the review items get the same treatment
+     as approved ones so the reader has the LLM's full rationale in hand.)
   …
 
   Also from this run: N rejected (logged for audit).   ← rejected-only footer;
@@ -794,6 +826,23 @@ below. Deterministic: all inputs are already on the idea dict
 (`entry_zone`, `stop`, `target`, `time_exit`, `needs_pullback`,
 `expression`, `symbol`) — no LLM call. Silently omitted when those
 fields are missing.
+
+**Rich LLM block.** Added 2026-04-21 alongside the prompt v3 rewrite.
+Replaces the old single-line `Reasoning:` for ideas that went through
+the gate. Four fields from the LLM's structured output:
+
+- `Summary:` — 1–2 sentence rationale for the decision
+- `Strengths:` — up to 2 bullets describing what supports the case
+- `Concerns:` — up to 2 bullets describing what weakens the case
+- `Judgment:` — one-sentence bottom line: why this deserves action now
+
+Bullet caps are enforced on the render side (prompt permits 3, email
+shows 2) so each idea stays skim-friendly. Same block renders in both
+"New ideas" (approved) and "Held for review" — concerns are useful
+context even on an approved idea. When the LLM was unavailable or a
+historical rec predates the rich-output schema, the render falls back
+to a single-line `Reasoning:` drawn from the legacy
+`recommendation.reasoning_summary`.
 
 **Price check line.** The post-emission price-freshness check
 (`mef.price_check`, see `mef_price_check.md`) fetches a live Yahoo
@@ -921,8 +970,7 @@ cadence:
 
 ranker:
   conviction_threshold: 0.5
-  max_new_ideas_per_run: 5
-  top_n_per_engine: 3
+  top_n_per_engine: 3       # effective LLM ceiling = top_n × N engines, deduped
   hazard_overlay:
     cap: 0.10
     macro:

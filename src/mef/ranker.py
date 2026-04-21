@@ -25,8 +25,8 @@ Conviction naming on ``RankedCandidate``:
 
 Emission (becoming a ``proposed`` recommendation) is decided downstream
 using ``conviction_score >= conviction_threshold`` AND a non-no_edge
-posture, capped at ``max_new_ideas_per_run``. Those two knobs live in
-``config/mef.yaml``.
+posture. Final narrowing to the LLM gate happens per-engine via
+``top_n_per_engine``; both knobs live in ``config/mef.yaml``.
 """
 
 from __future__ import annotations

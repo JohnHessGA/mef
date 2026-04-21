@@ -243,12 +243,21 @@ def _stamp_gate_decisions(
                 cur.execute(
                     """
                     UPDATE mef.candidate
-                       SET llm_gate_decision   = %s,
-                           llm_gate_reason     = %s,
-                           llm_gate_issue_type = %s
+                       SET llm_gate_decision      = %s,
+                           llm_gate_summary       = %s,
+                           llm_gate_strengths     = %s,
+                           llm_gate_concerns      = %s,
+                           llm_gate_key_judgment  = %s
                      WHERE uid = %s
                     """,
-                    (dec.decision, dec.reason, dec.issue_type, uid),
+                    (
+                        dec.decision,
+                        dec.summary,
+                        list(dec.strengths) if dec.strengths else None,
+                        list(dec.concerns) if dec.concerns else None,
+                        dec.key_judgment,
+                        uid,
+                    ),
                 )
     conn.commit()
 
@@ -264,10 +273,10 @@ def _mark_emitted(conn, candidate_uids: list[str]) -> None:
     conn.commit()
 
 
-def _compose_reasoning(cand: RankedCandidate, gate_reason: str | None) -> str:
-    """Prefer the LLM's one-sentence reason; fall back to ranker notes."""
-    if gate_reason:
-        return gate_reason
+def _compose_reasoning(cand: RankedCandidate, gate_summary: str | None) -> str:
+    """Prefer the LLM's 1–2 sentence summary; fall back to ranker notes."""
+    if gate_summary:
+        return gate_summary
     if cand.reasoning_notes:
         return "; ".join(cand.reasoning_notes)
     return f"{cand.posture} · conviction {cand.conviction_score:.2f}"
@@ -317,8 +326,8 @@ def _insert_recommendations(
                 continue
 
             uid = next_uid(conn, "recommendation")
-            gate_reason = decision.reason if decision.decision != "unavailable" else None
-            reasoning = _compose_reasoning(cand, gate_reason)
+            gate_summary = decision.summary if decision.decision != "unavailable" else None
+            reasoning = _compose_reasoning(cand, gate_summary)
             cur.execute(
                 """
                 INSERT INTO mef.recommendation (
@@ -327,7 +336,6 @@ def _insert_recommendations(
                     stop_level, invalidation_rule,
                     target_level, target_rule,
                     time_exit_date, confidence, reasoning_summary,
-                    llm_review_color,
                     source_engines,
                     state, state_changed_by
                 )
@@ -337,7 +345,6 @@ def _insert_recommendations(
                     %s, %s,
                     %s, %s,
                     %s, %s, %s,
-                    %s,
                     %s,
                     'proposed', 'run'
                 )
@@ -355,7 +362,6 @@ def _insert_recommendations(
                     cand.proposed_time_exit,
                     cand.conviction_score,
                     reasoning,
-                    gate_reason,
                     # Multi-engine source: every engine that picked this
                     # symbol in this run contributes to source_engines.
                     # Fall back to [cand.engine] when engine_scores isn't
@@ -365,9 +371,10 @@ def _insert_recommendations(
                 ),
             )
             pnl = _estimated_pnl(cand)
-            # Email rule: only LLM-approved (and unavailable, as a fallback so
-            # an LLM outage doesn't silence MEF). Review-tagged recs are saved
-            # but not emailed — visible via `mef recommendations --state proposed`.
+            # Email rule: approve + unavailable land in the "New ideas"
+            # section. Review-tagged items are selected separately by the
+            # pipeline and render in the "Held for review" section.
+            # Rejected ideas never become recommendations.
             should_email = decision.decision in ("approve", "unavailable")
             emitted_rows.append({
                 "rec_uid":           uid,
@@ -381,7 +388,10 @@ def _insert_recommendations(
                 "target":            cand.proposed_target,
                 "time_exit":         cand.proposed_time_exit,
                 "llm_gate":          decision.decision,
-                "issue_type":        decision.issue_type,
+                "llm_summary":       decision.summary,
+                "llm_strengths":     list(decision.strengths) if decision.strengths else [],
+                "llm_concerns":      list(decision.concerns) if decision.concerns else [],
+                "llm_key_judgment":  decision.key_judgment,
                 "should_email":      should_email,
                 "reasoning_summary": reasoning,
                 "needs_pullback":    cand.needs_pullback,
@@ -420,7 +430,6 @@ def _abort_for_stale_data(
     freshness: FreshnessReport,
     dry_run: bool,
     conviction_threshold: float,
-    max_new_ideas: int,
 ) -> dict[str, Any]:
     """Short-circuit the run when mart data is too stale to trust.
 
@@ -541,7 +550,6 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
     app_cfg = load_app_config()
     ranker_cfg = app_cfg.get("ranker") or {}
     conviction_threshold = float(ranker_cfg.get("conviction_threshold", 0.5))
-    max_new_ideas = int(ranker_cfg.get("max_new_ideas_per_run", 5))
 
     fresh_cfg = app_cfg.get("data_freshness") or {}
     fresh_warn = int(fresh_cfg.get("warn_after_calendar_days", 4))
@@ -595,7 +603,6 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                     freshness=freshness,
                     dry_run=dry_run,
                     conviction_threshold=conviction_threshold,
-                    max_new_ideas=max_new_ideas,
                 )
 
             hazard_config = ranker_cfg.get("hazard_overlay") or {}
@@ -635,8 +642,6 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 spy_return_20d=evidence.baseline.get("spy_return_20d"),
                 spy_return_63d=evidence.baseline.get("spy_return_63d"),
                 candidate_uids=prompt_uid_by_symbol,
-                engine_scores=engine_scores,
-                max_new_ideas=max_new_ideas,
             )
             _stamp_gate_decisions(
                 conn,
@@ -744,7 +749,7 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 recommendations_emitted=len(emitted_rows),
                 notes=(
                     f"as_of={evidence.as_of_date.isoformat()} "
-                    f"threshold={conviction_threshold} cap={max_new_ideas} "
+                    f"threshold={conviction_threshold} "
                     f"gate_available={gate.available} "
                     f"approved={len(gate.approved)} review={len(gate.review)} "
                     f"rejected={len(gate.rejected)} "
@@ -795,7 +800,6 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 staleness_warning=(freshness.message if freshness.should_warn else None),
                 upcoming_macro_events=evidence.baseline.get("upcoming_high_impact_events"),
                 per_engine_top=per_engine_top_for_email,
-                synthesis_order=gate.synthesis,
             )
 
             if dry_run:

@@ -54,7 +54,7 @@ The tool is built to ship fast, run every day, and improve from its own scoring 
 - **Lightweight vs. DAS.** Prefer the smallest schema and thinnest evidence stack that still produces useful output. Add complexity only after we've run it daily for a while.
 - **Fixed universe.** 305 stocks + 15 ETFs. No dynamic universe expansion in the near future.
 - **SHDB-only data in v1.** No DAS inputs (DAS isn't built). No RSE inputs yet either (RSE is still standing up). Both are candidates for later versions.
-- **Deterministic-first, LLM-reviewed.** Three independent deterministic engines — **trend** (continuation/breakout), **mean-reversion** (oversold bounce), and **value** (cheap + durable) — each produce their own top-N candidates. Claude CLI reviews the dedup'd union as a final sanity check and returns a synthesis ordering for the actionable email section. The LLM adds context and color; it does not replace the engines.
+- **Deterministic-first, LLM-reviewed.** Three independent deterministic engines — **trend** (continuation/breakout), **mean-reversion** (oversold bounce), and **value** (cheap + durable) — each produce their own top-N candidates. Claude CLI (Opus 4.7, as of 2026-04-21) reviews the dedup'd union as a conservative gate, judging each candidate independently (approve / review / reject) with structured rationale (summary, strengths, concerns, key judgment). The LLM adds context and color; it does not replace the engines and does not produce cross-candidate ordering.
 - **"No new trades today" is valid output.** Expected and healthy on weak-evidence days.
 - **Ship, then iterate.** Goal is a working end-to-end daily run as fast as possible; refine evidence weights, LLM prompt, email format, and scoring in subsequent passes.
 
@@ -83,7 +83,7 @@ The tool is built to ship fast, run every day, and improve from its own scoring 
   - Posture gate reads raw (`< 0.40 → no_edge`); emission gate reads final (`>= 0.50`); hazard-suppressed candidates are persisted and shadow-scored
 - Trade expressions (v1): buy shares, buy ETF shares, covered call, cash-secured put, reduce / exit / hedge (existing positions), hold cash
 - Per-recommendation plan: directional posture, expression, entry method, exit / invalidation, target holding window, confidence, short reasoning
-- LLM final-review pass (Claude CLI) over the deterministic ranker's top candidates with a **3-way disposition** (`approve` / `review` / `reject`) and a server-validated `issue_type` taxonomy — see `mef_llm_gate.md`
+- LLM final-review pass (Claude CLI, Opus 4.7) over the deterministic ranker's top candidates with a **3-way disposition** (`approve` / `review` / `reject`) and **structured per-candidate rationale** (summary, strengths, concerns, key judgment) — see `mef_llm_gate.md`
 - **Active-position tracking:**
   - Infer user's actual holdings from daily Fidelity Positions CSV ingest (same pattern as IRA Guard)
   - Track every MEF recommendation through its lifecycle (see §"Recommendation Lifecycle")
@@ -92,6 +92,7 @@ The tool is built to ship fast, run every day, and improve from its own scoring 
   - Idea header reads `SYMBOL[:etf] ($price) — posture — expression  [engine: …]`, with the price preferring the live Yahoo quote from `mef.price_check` and falling back to the scored SHDB close. ETF ideas carry a `:etf` tag so the reader spots them at a glance.
   - Every idea prints its `Rec ID: R-0000xx` so `mef show <rec-id>` at the bottom is directly actionable from the email.
   - **Plain-English action plan** on its own `Plan:` line right after Rec ID — one sentence restating the entry / target / stop / hold horizon in whole-dollar, skim-friendly form ("Buy under $141, sell near $151, cut at $130. Hold up to 30 days." / "Wait for a dip to $132, then buy…" / "Sell a cash-secured put at $165-$170…"). Deterministic, no LLM call.
+  - **Rich LLM rationale block** after the numeric details — `Summary:` (1–2 sentence reason), `Strengths:` (up to 2 bullets), `Concerns:` (up to 2 bullets), `Judgment:` (one-sentence "why now / why not"). Same block renders on both "New ideas" (approved) and "Held for review" items. Replaces the old single-line `Reasoning:` (which still appears as a fallback when the LLM was unavailable). Added 2026-04-21 alongside the prompt rewrite.
   - **Price-freshness sanity check** (`mef.price_check`, see `mef_price_check.md`) — annotates each idea when the live price has moved ≥1% since the SHDB close used at scoring time. ≥3% gets a ⚠ "entry zone may need refresh" warning. Never changes conviction or plan.
   - **LLM timeout retry** — the Claude CLI gate retries once on a timeout (pause 60s, bump timeout 120s → 180s) before falling through to the unavailable path. When the gate does fall through wholesale, the banner names the reason: "⚠ LLM gate was unavailable for this run **due to LLM timeouts** — ideas below were not reviewed."
 - **Data-freshness gate** — pipeline checks the latest mart bar age before ranking; warns above one threshold, aborts above another so MEF never ranks against silently-stale UDC data
@@ -156,11 +157,11 @@ Full quick reference + day-to-day usage lives in **`mef_operations.md`**. Highli
 | `mef run --when {premarket\|postmarket} [--dry-run]` | Execute one scheduled run (entry point for cron); `--dry-run` skips email send |
 | `mef status` | Environment, data freshness, last run, DB connectivity |
 | `mef recommendations [--state X\|--all\|--symbol\|--since <date>]` | List recommendations with lifecycle state |
-| `mef show <rec-uid>` | Full detail (gate decision, issue_type, paper-score outcome, P&L curve, provenance) |
+| `mef show <rec-uid>` | Full detail (gate decision, rich LLM rationale, paper-score outcome, P&L curve, provenance) |
 | `mef dismiss <rec-uid> [--note]` | Mark a proposed recommendation as not-implemented |
 | `mef tag <rec-uid> --provenance ...` | Override inferred activation provenance |
 | `mef link-trade <rec-uid> --qty --buy-price --buy-date [--sell-...]` | Record actual buy/sell on a scored rec |
-| `mef rejections [--symbol\|--since\|--limit]` | Audit table of LLM-rejected candidates with reason + issue_type |
+| `mef rejections [--symbol\|--since\|--limit]` | Audit table of LLM-rejected candidates with summary + concerns |
 | `mef gate-audit` | Side-by-side outcome distribution of approve / review / reject / unavailable |
 | `mef score` | Re-evaluate closed recs and refresh paper + shadow scoring |
 | `mef import-positions <csv>` | Ingest a Fidelity Portfolio Positions CSV |
@@ -218,9 +219,9 @@ Each run executes the same pipeline; only the intent (today-after-10 vs. next-tr
  7. Per-engine top-N (select_per_engine) → dedup by symbol
     (merge_for_llm) — each symbol appears in the LLM prompt at most
     once, annotated with its per-engine conviction scores
- 8. LLM gate (single Claude CLI call) — 3-way disposition per symbol
-    (approve/review/reject) + a synthesis ordering for the actionable
-    email list. See mef_llm_gate.md
+ 8. LLM gate (single Claude CLI call, Opus 4.7) — 3-way disposition
+    per symbol (approve/review/reject) with structured rationale
+    (summary + strengths + concerns + key_judgment). See mef_llm_gate.md
  9. Insert mef.recommendation rows for approve + review + unavailable
     (reject stays on mef.candidate only), with source_engines populated
     from every engine that picked the symbol
@@ -301,28 +302,29 @@ The activator infers this from the symbol's earliest position-snapshot date. `me
 
 MEF uses **Claude CLI (`claude -p`)** for the final-review step. The integration is built so **another LLM can be substituted later** (pluggable provider in the config).
 
-The LLM is a **gate**, not an idea generator. It returns a 3-way disposition per candidate:
+The LLM is a **gate**, not an idea generator. Model: **Opus 4.7** (upgraded from haiku on 2026-04-21). It returns a 3-way disposition per candidate:
 
-- `approve` — safe to ship as-is. Becomes a recommendation, appears in the email as "New ideas".
-- `review` — not safe to auto-ship. Becomes a recommendation, shown in the email under a separate **"Held for review"** section with the LLM's one-sentence reason so the user can decide whether to act manually. Also visible via `mef recommendations --state proposed`.
-- `reject` — not shipped. Audit trail on `mef.candidate.llm_gate_decision/reason/issue_type`.
+- `approve` — strong enough to be presented as a live recommendation now. Becomes a recommendation, appears in the email as "New ideas".
+- `review` — shows merit, deserves human inspection, not confident enough to auto-ship. Becomes a recommendation, shown in the email under a separate **"Held for review"** section with the full LLM rationale so the user can decide whether to act manually. Also visible via `mef recommendations --state proposed`.
+- `reject` — not sufficiently compelling, coherent, or timely. Not shipped. Audit trail on `mef.candidate` (decision + rich output columns).
 
-Each disposition carries an `issue_type` from a small enum (`mechanical`, `risk_shape`, `volatility_mismatch`, `posture_mismatch`, `asset_structure`, `options_structure`, `missing_context`, `none`) that's server-validated against a SQL CHECK constraint.
+Each disposition carries **structured rationale** (as of 2026-04-21): `summary` (1–2 sentence reason), `strengths[]` (up to 3 bullets), `concerns[]` (up to 3 bullets), and `key_judgment` (one-sentence "why now / why not"). The legacy `issue_type` enum is deprecated — the `concerns` bullets carry that signal in more useful form.
 
 What the LLM does **not** do:
 
 - Generate candidates from scratch (the engines do that)
-- Decide whether "no new trades today" is the right answer (the engines' thresholds decide that; an empty synthesis is also valid)
+- Decide whether "no new trades today" is the right answer (the engines' thresholds decide that; approving none is always valid)
+- Produce a cross-candidate ranking or top-pick ordering — each candidate is judged independently
 - Modify entry/exit prices (deterministic plan wins)
 - Browse, claim current news, or invent post-cutoff events
 
-What the LLM **does** do in the multi-engine world (2026-04-21 onward):
+What the LLM **does** do under the v3 prompt (2026-04-21 onward):
 
-- Reviews the union of per-engine top-Ns in a single prompt — sees each symbol once, annotated with per-engine conviction scores
-- Returns per-candidate approve/review/reject with issue_type + reason
-- Returns a `synthesis` array — its ordered top picks across all engines (bounded by `max_new_ideas`) that become the email's actionable section
+- Reviews the union of per-engine top-Ns in a single prompt — sees each symbol once, annotated with hazard overlay (`raw_conviction`, `hazard_penalty_total`, `hazard_flags`) so it doesn't re-raise already-priced concerns
+- Judges each candidate independently against its named posture (bullish / value_quality / oversold_bouncing / range_bound / bearish_caution / no_edge), using a thesis-quality + timing + risk-vs-reward rubric with the load-bearing caveat "do not confuse a good company with a good opportunity now"
+- Returns approve/review/reject with the structured rationale fields above
 
-Every LLM call is logged to `mef.llm_trace` with prompt, response, model, elapsed time, and linkage to the owning `daily_run` and candidate. The prompt design philosophy, prompt source, and iteration guide live in **`mef_llm_gate.md`**.
+Every LLM call is logged to `mef.llm_trace` with prompt, response, model, elapsed time, and linkage to the owning `daily_run`. The prompt design philosophy, prompt source, and iteration guide live in **`mef_llm_gate.md`**.
 
 If the LLM call fails, MEF ships the ideas anyway tagged `unavailable` ("Not reviewed by LLM") so an Anthropic outage doesn't silence the daily email.
 

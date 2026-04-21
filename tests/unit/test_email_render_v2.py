@@ -435,22 +435,97 @@ def test_per_engine_top_renders_side_by_side_section():
     assert "Value top 1" in body and "TGT" in body
 
 
-def test_synthesis_reorders_new_ideas():
-    # Three approved picks. LLM synthesis prefers TGT over JCI over PSX.
+def test_rich_llm_block_renders_on_approved_idea():
+    """Summary / Strengths / Concerns / Judgment replace the old Reasoning line."""
     email = render_daily_email(
         when_kind="premarket", intent="today_after_10am",
-        run_uid="DR-SYN1", started_at=_time(),
+        run_uid="DR-RICH", started_at=_time(),
         stocks_in_universe=305, etfs_in_universe=15,
-        new_ideas=[
-            _idea(symbol="JCI"),
-            _idea(symbol="PSX"),
-            _idea(symbol="TGT"),
-        ],
-        synthesis_order=["TGT", "JCI", "PSX"],
+        new_ideas=[_idea(
+            symbol="JCI",
+            llm_gate="approve",
+            llm_summary="Coherent trend continuation with good RS.",
+            llm_strengths=["trend support above SMAs", "RS vs SPY +22%"],
+            llm_concerns=["earnings in 19 days"],
+            llm_key_judgment="Worth approving — plan is clean and timing is now.",
+        )],
     )
     body = email.body
-    # TGT appears before JCI appears before PSX.
-    assert body.index("TGT") < body.index("JCI") < body.index("PSX")
+    assert "Summary:" in body
+    assert "Coherent trend continuation" in body
+    assert "Strengths:" in body
+    assert "trend support above SMAs" in body
+    assert "RS vs SPY +22%" in body
+    assert "Concerns:" in body
+    assert "earnings in 19 days" in body
+    assert "Judgment:" in body
+    assert "Worth approving" in body
+    # Legacy single-line Reasoning: must NOT appear when rich fields are present.
+    assert "Reasoning:" not in body
+
+
+def test_rich_llm_block_caps_bullets_at_two():
+    """LLM returned 3 strengths + 3 concerns; email only shows the first 2."""
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-CAP", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(
+            symbol="JCI",
+            llm_gate="approve",
+            llm_summary="ok",
+            llm_strengths=["s-one", "s-two", "s-three"],
+            llm_concerns=["c-one", "c-two", "c-three"],
+            llm_key_judgment="go",
+        )],
+    )
+    body = email.body
+    assert "s-one" in body and "s-two" in body
+    assert "s-three" not in body
+    assert "c-one" in body and "c-two" in body
+    assert "c-three" not in body
+
+
+def test_rich_llm_block_falls_back_to_reasoning():
+    """No rich fields → single-line Reasoning: fallback (covers LLM-unavailable
+    runs and historical recs from before the 2026-04-21 prompt rewrite)."""
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-LEGACY", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(
+            symbol="JCI", llm_gate="unavailable",
+            reasoning_summary="legacy one-liner",
+        )],
+    )
+    body = email.body
+    assert "Reasoning:" in body
+    assert "legacy one-liner" in body
+    assert "Summary:" not in body
+
+
+def test_rich_llm_block_renders_on_review_idea():
+    """Review-tagged ideas get the same rich block in the Held-for-review section."""
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-REV", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[],
+        review_ideas=[_idea(
+            symbol="BMY",
+            llm_gate="review",
+            llm_summary="Trend case exists but with caveats.",
+            llm_strengths=["MACD barely positive"],
+            llm_concerns=["SMA20 slope negative", "earnings in 13d"],
+            llm_key_judgment="Hold for human review — not strong enough to auto-ship.",
+        )],
+    )
+    body = email.body
+    assert "Held for review" in body
+    assert "Summary:" in body
+    assert "Trend case exists but with caveats" in body
+    assert "SMA20 slope negative" in body
+    assert "Hold for human review" in body
 
 
 def test_engine_badge_renders_lineage():

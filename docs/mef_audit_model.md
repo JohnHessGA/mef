@@ -191,7 +191,8 @@ Source: `src/mef/pnl_tracking.py`.
 
 "What did the LLM reject, and why?"
     → mef rejections (or mef.candidate WHERE llm_gate_decision='reject')
-    → llm_gate_issue_type for the structured reason class
+    → llm_gate_summary + llm_gate_concerns[] carry the rationale
+      (llm_gate_issue_type is deprecated; kept NULL on new rows)
 ```
 
 ---
@@ -235,18 +236,22 @@ SELECT 'rejected', COUNT(*),
 (`mef gate-audit` does this comparison in pure Python with sample-
 size discipline — prefer the CLI for routine use.)
 
-### Issue-type frequency on rejects
+### Rejection themes (frequency of concern bullets)
 
 ```sql
-SELECT llm_gate_issue_type, COUNT(*)
-  FROM mef.candidate
+SELECT concern, COUNT(*)
+  FROM mef.candidate,
+       LATERAL unnest(llm_gate_concerns) AS concern
  WHERE llm_gate_decision = 'reject'
  GROUP BY 1
- ORDER BY 2 DESC;
+ ORDER BY 2 DESC
+ LIMIT 20;
 ```
 
-A skewed distribution suggests the prompt could be tightened on the
-dominant category.
+Skew toward a single concern wording suggests the prompt could be
+tightened — the LLM may be over-weighting one class of signal.
+(Historical rows written before 2026-04-21 use the deprecated
+`llm_gate_issue_type` enum instead — see `mef_llm_gate.md`.)
 
 ### Real outcome vs paper outcome for the same rec
 
@@ -283,9 +288,10 @@ SELECT as_of_date, last_price, market_value,
 - `MIN_SAMPLE_FOR_SIGNAL = 20` (in `gate_audit.py`)
 - Below that, `mef gate-audit` withholds the headline diff and prints
   the warning *"Sample insufficient: need ~20+ settled outcomes per side."*
-- Realistic timing: at the configured `max_new_ideas_per_run = 5` and
-  most recs deferring until `time_exit` (~3 weeks out by default),
-  expect signal-grade samples roughly **6-8 weeks after first run**.
+- Realistic timing: with ~9 candidates per run reaching the LLM
+  (`top_n_per_engine=3` × 3 engines, deduped) and most recs deferring
+  until `time_exit` (~3 weeks out by default), expect signal-grade
+  samples roughly **6-8 weeks after first run**.
 - Don't tune the prompt or the conviction threshold off pre-signal
   data. Pattern-match temptation is high; the noise floor is higher.
 

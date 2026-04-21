@@ -1,7 +1,8 @@
 """`mef show <rec-uid>` — full detail on one recommendation.
 
 Joins to:
-- ``mef.candidate`` for evidence + gate decision/issue_type/reason
+- ``mef.candidate`` for evidence + gate decision + rich output
+  (summary / strengths / concerns / key_judgment)
 - ``mef.position_snapshot`` (via active_match_position_uid) for the
   matched holding when the rec is active or closed
 - ``mef.paper_score`` for the synthetic forward-walked outcome
@@ -23,13 +24,13 @@ SELECT
     r.stop_level, r.invalidation_rule,
     r.target_level, r.target_rule,
     r.time_exit_date, r.confidence, r.reasoning_summary,
-    r.llm_review_color, r.llm_review_concern,
     r.state, r.state_changed_at, r.state_changed_by,
     r.active_match_position_uid,
     r.provenance, r.provenance_set_by,
     r.created_at, r.updated_at,
     c.proposed_entry_zone, c.conviction_score, c.feature_json,
-    c.llm_gate_decision, c.llm_gate_issue_type, c.llm_gate_reason
+    c.llm_gate_decision, c.llm_gate_summary,
+    c.llm_gate_strengths, c.llm_gate_concerns, c.llm_gate_key_judgment
   FROM mef.recommendation r
   LEFT JOIN mef.candidate c ON c.uid = r.candidate_uid
  WHERE r.uid = %s
@@ -133,8 +134,19 @@ def run(args) -> int:
 
     print("LLM gate:")
     print(f"  decision:       {rec['llm_gate_decision'] or '-'}")
-    print(f"  issue_type:     {rec.get('llm_gate_issue_type') or '-'}")
-    print(f"  reason:         {rec['llm_gate_reason'] or '-'}")
+    print(f"  summary:        {rec.get('llm_gate_summary') or '-'}")
+    strengths = rec.get("llm_gate_strengths") or []
+    concerns = rec.get("llm_gate_concerns") or []
+    if strengths:
+        print("  strengths:")
+        for s in strengths:
+            print(f"    - {s}")
+    if concerns:
+        print("  concerns:")
+        for s in concerns:
+            print(f"    - {s}")
+    if rec.get("llm_gate_key_judgment"):
+        print(f"  key judgment:   {rec['llm_gate_key_judgment']}")
     print(f"  ship reasoning: {rec['reasoning_summary']}")
     print()
 

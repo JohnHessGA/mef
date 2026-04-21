@@ -31,7 +31,7 @@ Items past #16 that remain out of scope for v1 (web UI, DAS integration, RSE int
 
 ## Status notes
 
-- **Threshold + cap** currently default to `conviction_threshold=0.5`, `max_new_ideas_per_run=5` in `config/mef.yaml` (gitignored). Threshold lowered 0.6→0.5 once on 2026-04-19 to widen the candidate pool that competes for the top-5 cap. **From here it goes UP** as scoring evidence accumulates — see `CLAUDE.md` core principle #7.
+- **Threshold + per-engine cap** currently default to `conviction_threshold=0.5`, `top_n_per_engine=3` in `config/mef.yaml` (gitignored). Threshold lowered 0.6→0.5 once on 2026-04-19. The old post-LLM `max_new_ideas_per_run` hard cap was **removed on 2026-04-21** — the ranker's per-engine narrowing plus the LLM's high approve bar together enforce selectivity without an artificial post-gate truncation. **The threshold goes UP from here** as scoring evidence accumulates — see `CLAUDE.md` core principle #7.
 - **Coverage** at last verification: 305/305 stocks and 15/15 ETFs present in `mart.stock_equity_daily` / `mart.stock_etf_daily` as of 2026-04-17.
 - **First real run** (DR-000003): 320 symbols evaluated, 158 non-no_edge candidates, 5 emitted (STX, GEV, GLW, KLAC, LITE).
 - **First 3-way-gate run** (DR-000013, 2026-04-20): 0 approve / 3 review / 2 reject. LLM correctly used `review` with `issue_type=risk_shape` for "extended momentum, no pullback" setups (LITE +27%, STX +25% in 20d). Demonstrates the discriminating value of the new disposition vs the prior binary gate, which would have rejected outright.
