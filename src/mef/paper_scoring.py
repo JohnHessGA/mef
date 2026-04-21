@@ -61,6 +61,7 @@ def _emitted_recs(conn) -> list[dict[str, Any]]:
                    r.target_level    AS target_level,
                    r.time_exit_date  AS time_exit_date,
                    c.feature_json    AS feature_json,
+                   c.engine          AS engine,
                    c.llm_gate_decision AS gate_decision,
                    d.started_at::date  AS run_date
               FROM mef.recommendation r
@@ -142,9 +143,9 @@ def _score_one(conn, rec: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
                 estimated_pnl_100_shares_usd,
                 spy_return_same_window,
                 sector_etf_symbol, sector_etf_return_same_window,
-                notes
+                notes, engine
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 score_uid, rec["rec_uid"], rec["candidate_uid"], gate, outcome,
@@ -154,6 +155,7 @@ def _score_one(conn, rec: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
                 sector_etf, sector_ret,
                 ("no mart bars between entry+1 and time_exit"
                  if exit_price is None else None),
+                rec.get("engine"),
             ),
         )
     conn.commit()

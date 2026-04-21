@@ -135,24 +135,30 @@ get forgotten):
 
 ### Ensemble of independent ranker engines
 
-**Status change 2026-04-22:** Moved from "deferred" to "active planning"
-at user direction. Per the MEF operating principle that conviction
-thresholds rise with confidence — not fall to fill quiet days — adding
-a second engine is a legitimate answer to "how do we produce ideas the
-current trend-follower structurally can't surface" without lowering
-the threshold on the existing engine.
+**Status change 2026-04-23:** SHIPPED (monitoring). The single
+trend-follower was expanded into a three-engine ensemble — trend,
+mean-reversion, value — each scoring independently, with a single
+LLM call receiving the dedup'd union and returning a synthesis
+ordering. See `mef_build_order.md` 2026-04-23 status note for
+commit-by-commit breakdown, `mef_design_spec.md` §6.2 for the
+architecture, and `mef_llm_gate.md` structural choice #7 for the
+multi-engine prompt design.
 
-**Original rationale for deferral** (retained so reviewers know what
-we're trading off):
-- Non-trivial structural work (second scoring module, fusion logic,
-  separate thresholds, expanded LLM prompt, per-engine telemetry).
-- Without outcome data on the current ranker, we can't measure whether
-  a second engine adds signal or noise.
+**Why we shipped despite the original "wait for scoring data"
+caveat:** the user accepted the tradeoff explicitly. Per-engine
+telemetry (`mef.shadow_score.engine`, `mef.paper_score.engine`)
+means the same audit infrastructure that measures the single-engine
+hit rate now measures each engine independently AND the ensemble's
+synthesis output. When scoring data accumulates (~30 closes, mid-
+to-late May 2026), `mef gate-audit --by-engine` will answer whether
+any engine underperforms and should be disabled, whether engine
+agreement predicts better outcomes than engine disagreement, and
+whether the LLM's synthesis ordering beats raw conviction ordering.
 
-**Mitigation:** we ship the second engine with per-engine telemetry
-and shadow-score it in parallel, so the same audit infrastructure that
-measures the current engine's hit rate also measures the ensemble's.
-See `mef_build_order.md` for the current status.
+**Load-bearing constraint still honored:** "no new trades today"
+remains a valid output. If all three engines produce zero
+above-threshold candidates, or the LLM synthesizes an empty list,
+the actionable section is empty.
 
 ### Falling-knife detection via SMA20 direction
 

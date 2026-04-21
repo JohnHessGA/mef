@@ -205,9 +205,59 @@ SPY's 20d/63d returns (legacy; ranker now reads `rs_vs_spy_*` columns
 directly) and a `sector_returns_63d` map keyed by sector ETF symbol,
 built from the ETF universe pull itself — no extra query.
 
-### 6.2 Ranker
+### 6.2 Ranker — three-engine ensemble
 
-Deterministic, per-symbol scorer in `src/mef/ranker.py :: _score_symbol`.
+As of 2026-04-22, MEF runs three independent deterministic engines per
+run. Each produces its own top-N. The three top-Ns dedup into a
+unique-by-symbol list that goes to a single LLM call, which returns
+per-candidate dispositions AND a synthesis ordering for the actionable
+email section.
+
+**Engines:**
+
+| Engine | Philosophy | Module | Postures it emits |
+|---|---|---|---|
+| `trend` | Continuation / breakout. Rewards above-SMAs, rising slopes, coiled-near-SMA50, sector leadership. | `_rank_trend` → `_score_symbol` | `bullish`, `range_bound` |
+| `mean_reversion` | Oversold bounce. RSI < 40, 5-15% below SMA50, `return_5d ≥ 0`. Hard vetos falling knives. | `_rank_mean_reversion` → `_score_mean_rev` | `oversold_bouncing` |
+| `value` | Cheap + durable. Low PE, positive FCF, modest-positive 252d trend. Equities-only. Penalizes momentum-extended names. | `_rank_value` → `_score_value` | `value_quality` |
+
+All three share a common return type (`RankedCandidate`) that carries
+an `engine` field set by the registry. All three apply the same
+earnings/macro/FCF gates (duplicated rather than inherited — each
+engine's scoring context is different enough that sharing a base class
+would leak abstraction).
+
+**Per-run flow:**
+
+1. `rank(evidence)` iterates every registered engine, returns a
+   conviction-sorted flat list tagged with `engine`.
+2. `select_per_engine(candidates, threshold, top_n_per_engine)` returns
+   `{engine: top-N}`. Each engine has its own threshold (default shared
+   `conviction_threshold`) and its own top-N cap (`top_n_per_engine`
+   config knob, default 3).
+3. `merge_for_llm(per_engine)` dedups by symbol (keeping the highest-
+   conviction variant across engines) and returns:
+   - `unique_candidates`: list for the LLM prompt.
+   - `engine_scores`: `{symbol: {engine: conviction}}` so the prompt
+     can annotate per-engine agreement/disagreement.
+4. LLM gate runs once — see §10 and `mef_llm_gate.md`. Gate returns
+   per-candidate disposition AND a `synthesis` array (ordered top
+   picks across engines, bounded by `max_new_ideas_per_run`).
+5. `_insert_recommendations` creates one rec per approved/review/
+   unavailable symbol with `source_engines` populated (every engine
+   that picked the symbol, not just the highest-conviction one).
+6. Every engine's candidate row for the emitted symbol is marked
+   `emitted = TRUE` so audit can attribute outcomes per engine.
+
+**Why three distinct engines vs. one ranker with more signals:**
+every single-philosophy scorer has structural blind spots. A
+trend-follower will never surface oversold bounces; a mean-reverter
+will never surface breakouts. Three independent scorers with
+different philosophies surface non-overlapping picks — in the
+2026-04-21 dry-run, trend (JCI/TJX/ACGL), mean-reversion
+(PSX/SYY/TMUS), and value (TGT/MRK/PFE) had *zero* symbol overlap.
+
+**Per-engine scoring rules** (trend, unchanged from pre-ensemble work):
 
 **Return type.** Per symbol, emits a `RankedCandidate` with:
 - `posture` — `bullish` / `bearish_caution` / `range_bound` / `no_edge`

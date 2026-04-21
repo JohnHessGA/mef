@@ -64,7 +64,7 @@ def _rejected_candidates(conn) -> list[dict[str, Any]]:
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT c.uid, c.symbol, c.asset_kind,
+            SELECT c.uid, c.symbol, c.asset_kind, c.engine,
                    c.proposed_stop, c.proposed_target, c.proposed_time_exit,
                    c.feature_json,
                    c.llm_gate_decision,
@@ -191,15 +191,16 @@ def _score_one(conn, cand: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
                     estimated_pnl_100_shares_usd,
                     spy_return_same_window,
                     sector_etf_symbol, sector_etf_return_same_window,
-                    notes
+                    notes, engine
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     score_uid, cand["uid"], cand["llm_gate_decision"], "timeout",
                     entry_price, None, entry_date, None, None,
                     None, None, sector_etf, None,
                     "no mart bars between entry+1 and time_exit",
+                    cand.get("engine"),
                 ),
             )
         conn.commit()
@@ -224,9 +225,10 @@ def _score_one(conn, cand: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
                 entry_price, exit_price, entry_date, exit_date, days_held,
                 estimated_pnl_100_shares_usd,
                 spy_return_same_window,
-                sector_etf_symbol, sector_etf_return_same_window
+                sector_etf_symbol, sector_etf_return_same_window,
+                engine
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 score_uid, cand["uid"], cand["llm_gate_decision"], outcome,
@@ -234,6 +236,7 @@ def _score_one(conn, cand: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
                 round(pnl_100sh, 2),
                 spy_ret,
                 sector_etf, sector_ret,
+                cand.get("engine"),
             ),
         )
     conn.commit()
