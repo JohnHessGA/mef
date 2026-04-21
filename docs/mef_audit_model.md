@@ -74,22 +74,25 @@ price actually breached target), the rec's `state` is updated to align
 
 ---
 
-## `mef.shadow_score` — what the LLM rejected
+## `mef.shadow_score` — what MEF decided not to emit
 
-For every candidate where `llm_gate_decision = 'reject'`, MEF
-forward-walks the would-have-been-trade through the same stop / target
-/ time_exit the candidate carried, using close prices from
-`mart.stock_*_daily`.
+For every candidate where `llm_gate_decision = 'reject'` OR
+`suppressed_by_hazard = TRUE`, MEF forward-walks the would-have-been-
+trade through the same stop / target / time_exit the candidate carried,
+using close prices from `mart.stock_*_daily`.
 
-This makes the LLM gate **falsifiable**: without this table, every
-"reject" decision is a black box — we'd never know whether the LLM is
-removing alpha or removing landmines.
+This makes **both** the LLM gate and the Layer B hazard overlay
+falsifiable: without shadow-scoring, every suppression is a black box —
+we'd never know whether the LLM / overlay is removing alpha or removing
+landmines.
 
 Same outcome columns as `mef.score`. Plus:
 
-- `gate_decision` snapshot (always `'reject'` here)
-- Keyed on `candidate_uid` because rejected candidates never become
-  recommendations — they don't have a `rec_uid`.
+- `gate_decision` — either the literal LLM verdict (`'reject'`) or the
+  sentinel string `'hazard_suppressed'` for Layer B suppressions. The
+  column answers "why wasn't this emitted?" at audit time.
+- Keyed on `candidate_uid` because rejected / suppressed candidates
+  never become recommendations — they don't have a `rec_uid`.
 
 Defers scoring when `time_exit` hasn't passed and no breach has
 occurred yet — those rows materialize automatically on a later run.

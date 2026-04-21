@@ -222,10 +222,24 @@ email section.
 | `value` | Cheap + durable. Low PE, positive FCF, modest-positive 252d trend. Equities-only. Penalizes momentum-extended names. | `_rank_value` → `_score_value` | `value_quality` |
 
 All three share a common return type (`RankedCandidate`) that carries
-an `engine` field set by the registry. All three apply the same
-earnings/macro/FCF gates (duplicated rather than inherited — each
-engine's scoring context is different enough that sharing a base class
-would leak abstraction).
+an `engine` field set by the registry. Gating is no longer duplicated
+across engines — as of 2026-04-21 MEF uses a three-layer model:
+
+1. **Layer A — eligibility** (`mef.eligibility`). Per-engine earnings
+   blackout windows (trend 5d, mean_rev 10d, value 10d) plus data
+   presence. Universal — same set of hard exclusions applied before any
+   engine scores.
+2. **Layer C — per-engine thesis** (each `_score_*` function). Pure
+   signal math. Produces `raw_conviction` + `posture`. The value
+   engine owns the FCF hard veto here because FCF is the value thesis,
+   not a universal risk control.
+3. **Layer B — hazard overlay** (`mef.hazard_overlay`). Penalty-only
+   adjustments for macro events and earnings-proximity (trend only).
+   Produces `final_conviction = max(0, raw - hazard_total)`.
+
+See `docs/mef_layered_gating.md` for the full layered model. That
+document is the single source of truth; this section summarizes for
+context but defers to it on specifics.
 
 **Per-run flow:**
 
@@ -320,17 +334,23 @@ Regardless-of-posture:
 | Rule                                      | Effect |
 |-------------------------------------------|--------|
 | `drawdown_current < -0.20` (deep drawdown) | -0.15 |
-| **Earnings within 5d (stocks)**            | **hard veto → `no_edge`** |
-| **Earnings within 10d + `needs_pullback`** | **hard veto → `no_edge`** |
-| Earnings 6–10d (non-pullback)              | -0.15 |
-| Earnings 11–21d                            | -0.03 (caution flag) |
-| High-impact US macro event in 0–1d (bullish/range_bound only) | -0.05 |
-| **Fundamentals (equities only)**: `free_cash_flow < 0` | **hard veto → `no_edge`, base = 0.0** |
 | `pe_trailing > 60`                         | -0.05 |
 | `earnings_yield` in (0, 0.02)              | -0.02 |
 
-After all adjustments: `conviction_score = clamp(base, 0, 1)`.
-If `conviction < 0.40` → posture demoted to `no_edge`.
+After all adjustments: `raw_conviction = clamp(base, 0, 1)`.
+If `raw_conviction < 0.40` → posture demoted to `no_edge`.
+
+**Moved out of Layer C as of 2026-04-21** (see `mef_layered_gating.md`):
+- Earnings blackout — now Layer A eligibility (5d trend, 10d mean_rev/value).
+- Earnings 6–21d penalty/flag zone — now Layer B earnings-proximity hazard (trend only).
+- High-impact US macro event — now Layer B macro hazard (4 event types × symbol × engine).
+- Negative FCF hard veto — moved out of trend/mean_rev entirely. Retained in Layer C for the **value engine only**, because FCF is the value thesis (cheap + durable).
+
+The raw vs final split means `conviction_score` in the code is now
+*final* conviction (after hazard overlay). `raw_conviction` is a new
+column on `mef.candidate` carrying the pre-overlay engine belief.
+Selectors compare against `conviction_score` / final; the `< 0.40`
+posture demotion fires on raw.
 
 **Separation of concerns.** The ranker alone decides whether to emit
 and how many. The LLM step (§10) only reviews what the ranker
@@ -515,18 +535,34 @@ One row per scheduled run.
 
 ### `mef.candidate`
 
-One row per symbol per run.
+One row per (engine, symbol) per run.
 
+Core:
 - `candidate_uid` (PK, prefix `C-`)
 - `run_uid` (FK)
 - `symbol`
 - `asset_kind` (`stock` / `etf`)
-- `posture` (`bullish` / `bearish_caution` / `range_bound` / `no_edge`)
-- `conviction_score`
+- `engine` (`trend` / `mean_reversion` / `value`)
+- `posture` (`bullish` / `bearish_caution` / `range_bound` / `no_edge` / `oversold_bouncing` / `value_quality`)
+- `conviction_score` — **final** (post-overlay) conviction used by selectors
 - `feature_json` (all evidence values used)
 - `proposed_expression` (nullable until a plan is drafted)
 - `proposed_entry_zone`, `proposed_stop`, `proposed_target`, `proposed_time_exit`
 - `emitted` (bool — whether this candidate became a recommendation)
+
+Layered gating (added in migration 011):
+- `raw_conviction` — engine belief before hazard overlay
+- `hazard_penalty_total` — sum of applied hazard components (capped 0.10)
+- `hazard_penalty_macro` — macro component only
+- `hazard_penalty_earnings_prox` — earnings-proximity component (trend-only)
+- `hazard_event_type` — top-impact macro event driving the macro penalty
+- `hazard_flags` — short tags (e.g. `macro:fomc`, `earn_prox:6-10d`)
+- `selected_pre_llm` — final conviction cleared emission threshold
+- `suppressed_by_hazard` — real thesis (raw ≥ threshold) silenced by overlay
+- `eligibility_pass` — Layer A verdict
+- `eligibility_fail_reasons` — Layer A failure reasons
+
+See `docs/mef_layered_gating.md` for the canonical semantics of each field.
 
 ### `mef.recommendation`
 

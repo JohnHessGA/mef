@@ -75,7 +75,12 @@ The tool is built to ship fast, run every day, and improve from its own scoring 
   - options open interest context (where available)
   - benchmark-relative movement (SPY + sector ETFs from the 15-ETF list)
   - earnings proximity and documented calendar events (as available in SHDB)
-- Directional posture per candidate: `bullish` / `bearish_caution` / `range_bound` / `no_edge`
+- Directional posture per candidate: `bullish` / `bearish_caution` / `range_bound` / `no_edge` (plus `oversold_bouncing` from mean-reversion and `value_quality` from the value engine)
+- **Layered gating** (as of 2026-04-21) — see `mef_layered_gating.md` for the canonical spec:
+  - **Layer A eligibility**: universe + data freshness + per-engine earnings blackout (trend 5d, mean_rev 10d, value 10d)
+  - **Layer C engine thesis**: pure signal math per engine, produces `raw_conviction` + posture; value engine owns the FCF hard veto (thesis-level)
+  - **Layer B hazard overlay**: penalty-only adjustments for macro releases and earnings-proximity (trend); `final_conviction = max(0, raw - hazard_total)` capped at 0.10
+  - Posture gate reads raw (`< 0.40 → no_edge`); emission gate reads final (`>= 0.50`); hazard-suppressed candidates are persisted and shadow-scored
 - Trade expressions (v1): buy shares, buy ETF shares, covered call, cash-secured put, reduce / exit / hedge (existing positions), hold cash
 - Per-recommendation plan: directional posture, expression, entry method, exit / invalidation, target holding window, confidence, short reasoning
 - LLM final-review pass (Claude CLI) over the deterministic ranker's top candidates with a **3-way disposition** (`approve` / `review` / `reject`) and a server-validated `issue_type` taxonomy — see `mef_llm_gate.md`

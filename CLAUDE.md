@@ -17,6 +17,7 @@ The spec is the source of truth. Read the relevant section before implementing; 
 |---|---|
 | `docs/README_mef.md` | Build specification — purpose, scope, UX, universe, daily workflow, lifecycle, CLI surface, hard boundaries, build order |
 | `docs/mef_design_spec.md` | Architectural design — components, data sources, pipeline, evidence, ranking, lifecycle state machine, LLM policy, MEFDB schema, email rendering, telemetry, repo shape |
+| `docs/mef_layered_gating.md` | **Canonical** reference for the Layer A / Layer B / Layer C model (eligibility / hazard overlay / engine thesis). Wins over design spec on any gating conflict. |
 | `notes/muse-engine-forecaster-overview.md` | Original product-vision note (human-authored) |
 | `notes/focus-universe-us-stocks-final.md` | Stock universe (305) |
 | `notes/core-us-etfs-daily-final.md` | ETF universe (15) |
@@ -81,9 +82,17 @@ Canonical list lives in `docs/mef_design_spec.md` §11. The v1 tables are:
 
 `universe_stock`, `universe_etf`, `daily_run`, `candidate`, `recommendation`,
 `recommendation_update`, `import_batch`, `position_snapshot`,
-`benchmark_snapshot`, `score`, `llm_trace`, `command_log`.
+`benchmark_snapshot`, `score`, `shadow_score`, `paper_score`,
+`llm_trace`, `command_log`.
 
 UID prefixes: `DR-` daily_run, `C-` candidate, `R-` recommendation, `I-` import_batch, `P-` position_snapshot, `S-` score, `L-` llm_trace.
+
+`mef.candidate` carries the layered-gating decomposition as of migration
+011: `raw_conviction`, `hazard_penalty_total`, `hazard_penalty_macro`,
+`hazard_penalty_earnings_prox`, `hazard_event_type`, `hazard_flags`,
+`selected_pre_llm`, `suppressed_by_hazard`, `eligibility_pass`,
+`eligibility_fail_reasons`. `conviction_score` holds the final
+(post-overlay) value — selectors compare against it.
 
 Read the design spec before writing any DDL or repository code. Start minimal; add columns only when a concrete caller needs them.
 
