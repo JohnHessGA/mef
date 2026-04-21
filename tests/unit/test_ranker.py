@@ -26,6 +26,10 @@ def _row(**kwargs):
     base = {
         "symbol": "TEST", "asset_kind": "stock", "bar_date": date(2026, 4, 17),
         "close": 100.0, "sma_20": 98.0, "sma_50": 95.0, "sma_200": 90.0,
+        # sma_slopes default to a clearly rising trend so baseline tests
+        # don't accidentally trigger chop detection. flat_th at close=100
+        # is 0.08, so 0.2 sits firmly in "rising" territory.
+        "sma_20_slope": 0.20, "sma_50_slope": 0.15,
         "return_20d": 0.03, "return_63d": 0.05,
         "rsi_14": 55.0, "macd_histogram": 0.5,
         "realized_vol_20d": 0.15, "drawdown_current": -0.02,
@@ -104,6 +108,24 @@ def test_select_for_emission_applies_threshold_and_cap():
 
     survivors_capped = select_for_emission(cands, conviction_threshold=0.5, max_new_ideas=1)
     assert len(survivors_capped) == 1
+
+
+def test_flat_smas_above_support_flip_to_range_bound():
+    # Both SMAs essentially flat → stock is chopping above support, not
+    # actually trending. Should NOT score as bullish.
+    chop = _row(sma_20_slope=0.01, sma_50_slope=0.02)  # <<< flat threshold 0.08
+    cand = rank(_bundle({"WMT": chop}))[0]
+    assert cand.posture == POSTURE_RANGE_BOUND
+    # And the note explains why, for audit.
+    assert any("SMAs flat" in n for n in cand.reasoning_notes)
+
+
+def test_sma20_rolling_over_penalizes():
+    # Falling SMA20 = short-term trend has rolled over, even if close is
+    # still above. Penalty relative to a rising-slope control.
+    rolling = rank(_bundle({"X": _row(sma_20_slope=-0.5)}))[0]
+    rising = rank(_bundle({"X": _row(sma_20_slope=0.5)}))[0]
+    assert rolling.conviction_score < rising.conviction_score
 
 
 def test_needs_pullback_anchors_entry_below_close():

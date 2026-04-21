@@ -90,6 +90,24 @@ def _score_symbol(symbol: str, row: dict[str, Any], baseline: dict[str, Any]) ->
     if above_50 and above_200:
         posture = POSTURE_BULLISH
         base = 0.55
+        # Chop detection: above both SMAs but neither is actually rising.
+        # `sma_*_slope` is in price/day; normalize by close so the threshold
+        # scales across $10 and $1000 names. |slope|/close < 0.08%/day is
+        # effectively sideways.
+        sma20_slope = row.get("sma_20_slope")
+        sma50_slope = row.get("sma_50_slope")
+        flat_th = 0.0008 * close
+        if (sma20_slope is not None and sma50_slope is not None
+                and abs(sma20_slope) < flat_th and abs(sma50_slope) < flat_th):
+            posture = POSTURE_RANGE_BOUND
+            base = 0.40
+            notes.append("SMAs flat → chop above support")
+        elif sma20_slope is not None and sma20_slope > 0:
+            base += 0.03
+            notes.append("SMA20 rising")
+        elif sma20_slope is not None and sma20_slope < -flat_th:
+            base -= 0.05
+            notes.append("SMA20 rolling over")
         if rsi is not None and 45 <= rsi <= 65:
             base += 0.10
             notes.append(f"RSI healthy ({rsi:.0f})")
