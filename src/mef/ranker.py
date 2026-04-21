@@ -965,17 +965,84 @@ def rank(
     return out
 
 
+# Postures that any engine considers emittable. Each engine may use
+# its own specific posture name (bullish / oversold_bouncing /
+# value_quality / range_bound) — all of them are candidates for the
+# LLM to review.
+EMITTABLE_POSTURES = frozenset([
+    POSTURE_BULLISH,
+    POSTURE_RANGE_BOUND,
+    POSTURE_OVERSOLD_BOUNCING,
+    POSTURE_VALUE_QUALITY,
+])
+
+
 def select_for_emission(
     candidates: list[RankedCandidate],
     *,
     conviction_threshold: float,
     max_new_ideas: int,
 ) -> list[RankedCandidate]:
-    """Apply threshold + cap. Only bullish and range_bound survive to emission."""
+    """Single-engine selection path: apply threshold + cap across all
+    emittable candidates, return flat top-N. Retained for backward
+    compat with callers that don't yet use the per-engine selection.
+    """
     eligible = [
         c for c in candidates
-        if c.posture in (POSTURE_BULLISH, POSTURE_RANGE_BOUND)
+        if c.posture in EMITTABLE_POSTURES
         and c.conviction_score >= conviction_threshold
     ]
     eligible.sort(key=lambda c: c.conviction_score, reverse=True)
     return eligible[:max_new_ideas]
+
+
+def select_per_engine(
+    candidates: list[RankedCandidate],
+    *,
+    conviction_threshold: float,
+    top_n_per_engine: int,
+) -> dict[str, list[RankedCandidate]]:
+    """Per-engine selection: return {engine_name: top-N emittable candidates}.
+
+    The LLM will see the union of every engine's top-N. Each engine's
+    threshold is applied independently — engines with different scoring
+    scales produce different absolute conviction numbers and this is
+    the right unit to cap at.
+    """
+    per_engine: dict[str, list[RankedCandidate]] = {}
+    for c in candidates:
+        if c.posture not in EMITTABLE_POSTURES:
+            continue
+        if c.conviction_score < conviction_threshold:
+            continue
+        per_engine.setdefault(c.engine, []).append(c)
+    for engine in per_engine:
+        per_engine[engine].sort(key=lambda c: c.conviction_score, reverse=True)
+        per_engine[engine] = per_engine[engine][:top_n_per_engine]
+    return per_engine
+
+
+def merge_for_llm(
+    per_engine: dict[str, list[RankedCandidate]],
+) -> tuple[list[RankedCandidate], dict[str, dict[str, float]]]:
+    """Dedup per-engine top-Ns into a unique-by-symbol list for the LLM.
+
+    Returns (unique_candidates, per_symbol_engine_scores). For each
+    unique symbol, the returned candidate is the highest-conviction
+    version across engines (so the LLM sees a coherent draft plan).
+    ``per_symbol_engine_scores`` maps ``symbol -> {engine: conviction}``
+    so the prompt can annotate each symbol with its per-engine scores.
+    """
+    best_by_symbol: dict[str, RankedCandidate] = {}
+    scores: dict[str, dict[str, float]] = {}
+    for engine, cands in per_engine.items():
+        for c in cands:
+            scores.setdefault(c.symbol, {})[engine] = c.conviction_score
+            prev = best_by_symbol.get(c.symbol)
+            if prev is None or c.conviction_score > prev.conviction_score:
+                best_by_symbol[c.symbol] = c
+    merged = sorted(
+        best_by_symbol.values(),
+        key=lambda c: c.conviction_score, reverse=True,
+    )
+    return merged, scores

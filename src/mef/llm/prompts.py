@@ -93,6 +93,31 @@ If the candidate might be valid but essential context is missing, use "review".
 Do not approve borderline cases.
 
 ----------------------------------------------------------------
+SPECIAL RULE FOR MULTI-ENGINE CANDIDATES
+----------------------------------------------------------------
+
+MEF ranks candidates using three independent deterministic engines:
+
+- **trend** — rewards continuation/breakout setups (above SMAs, rising
+  slopes, sector leadership).
+- **mean_reversion** — rewards oversold bounces (RSI < 40, 5-15% below
+  SMA50, return_5d ≥ 0 = stabilizing).
+- **value** — rewards cheap + durable names (low PE, positive FCF,
+  modest-positive 252d trend).
+
+Each candidate line shows `engines=[engine_name=score ...]` listing
+which engines picked this symbol and at what conviction. Engines
+agreeing (≥2 engines named) is a STRONG signal — you should weigh
+this toward approve if the plan is coherent. Engines disagreeing is
+CONTEXT, not a rejection — each engine's best pick may legitimately
+not interest the others (e.g., an oversold-bouncing stock is
+mean-rev territory but not trend territory, and that's by design).
+
+When you write the synthesis block, prefer names with multiple engine
+agreement. When engines disagree, prefer the engine with higher
+absolute conviction unless the draft plan has a specific problem.
+
+----------------------------------------------------------------
 SPECIAL RULE FOR PULLBACK SETUPS
 ----------------------------------------------------------------
 
@@ -190,8 +215,16 @@ Return JSON only, matching exactly this schema:
       "issue_type": "none" | "mechanical" | "risk_shape" | "volatility_mismatch" | "posture_mismatch" | "asset_structure" | "options_structure" | "missing_context",
       "reason": "<one sentence>"
     }}
-  ]
+  ],
+  "synthesis": ["<SYM1>", "<SYM2>", "..."]
 }}
+
+The `synthesis` array is your ordered top picks across all engines —
+the names you'd actually ship if MEF sent one email. Include up to
+{max_new_ideas} symbols. Order by your combined conviction (engine
+agreement + plan quality + risk-shape). Only include symbols you
+listed as "approve" in reviews. Empty array means "no new trades
+today" — a valid output on weak days.
 
 Context for this run:
 as_of_date: {as_of_date}
@@ -219,6 +252,7 @@ def render_candidates_block(candidates: list[dict[str, Any]]) -> str:
             f"posture={c['posture']} conviction={c['conviction_score']:.2f} "
             f"pullback_setup={str(bool(c.get('needs_pullback'))).lower()} "
             f"days_to_earnings={c.get('days_to_earnings') if c.get('days_to_earnings') is not None else 'n/a'} "
+            f"engines=[{c.get('engine_scores_str', 'n/a')}] "
             f"close={_fmt(fx.get('close'), '{:.2f}')} "
             f"ret5d={_fmt_pct(fx.get('return_5d'))} "
             f"ret20d={_fmt_pct(fx.get('return_20d'))} "
@@ -249,6 +283,7 @@ def build_gate_prompt(
     as_of_date: str,
     spy_return_20d: float | None,
     spy_return_63d: float | None,
+    max_new_ideas: int = 5,
 ) -> str:
     return GATE_PROMPT_TEMPLATE.format(
         n_candidates=len(candidates),
@@ -256,6 +291,7 @@ def build_gate_prompt(
         spy_ret20=_fmt_pct(spy_return_20d) or "n/a",
         spy_ret63=_fmt_pct(spy_return_63d) or "n/a",
         candidates_block=render_candidates_block(candidates),
+        max_new_ideas=max_new_ideas,
     )
 
 

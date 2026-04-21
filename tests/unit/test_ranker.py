@@ -110,13 +110,35 @@ def test_deep_drawdown_penalty():
     assert cands[0].conviction_score < no_dd[0].conviction_score
 
 
+def test_select_per_engine_and_merge():
+    from mef.ranker import select_per_engine, merge_for_llm
+    bundle = _bundle({
+        "TRND":  _row(symbol="TRND"),
+        "OSOL":  _oversold_row(symbol="OSOL"),
+        "VALQ":  _value_row(symbol="VALQ"),
+    })
+    cands = rank(bundle)
+    per_engine = select_per_engine(cands, conviction_threshold=0.5,
+                                   top_n_per_engine=3)
+    assert "trend" in per_engine
+    assert "mean_reversion" in per_engine
+    assert "value" in per_engine
+    merged, scores = merge_for_llm(per_engine)
+    # Every emittable candidate shows up exactly once in the merged list
+    # (unique by symbol).
+    symbols = [c.symbol for c in merged]
+    assert len(symbols) == len(set(symbols))
+    # engine_scores map records per-engine conviction per symbol
+    assert "TRND" in scores and "trend" in scores["TRND"]
+
+
 def test_select_for_emission_applies_threshold_and_cap():
     bundle = _bundle({
         "A": _row(symbol="A"),
         "B": _row(symbol="B", return_20d=0.05, volume_z_score=1.2),
         "C": _row(symbol="C", trend_above_sma50=False, trend_above_sma200=False),  # bearish
     })
-    cands = rank(bundle)
+    cands = rank(bundle, enabled_engines=["trend"])
 
     survivors = select_for_emission(cands, conviction_threshold=0.5, max_new_ideas=5)
     assert all(c.posture in ("bullish", "range_bound") for c in survivors)

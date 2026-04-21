@@ -33,7 +33,10 @@ from mef.email_send import send_daily_email
 from mef.evidence import EvidenceBundle, FreshnessReport, check_freshness, pull_latest_evidence
 from mef.lifecycle import sweep as lifecycle_sweep
 from mef.llm.gate import GateResult, apply_gate
-from mef.ranker import RankedCandidate, rank, select_for_emission
+from mef.ranker import (
+    RankedCandidate, rank, select_for_emission,
+    select_per_engine, merge_for_llm,
+)
 from mef.paper_scoring import paper_score_emitted
 from mef.pnl_tracking import snapshot_daily_pnl
 from mef.scoring import score_all_pending
@@ -180,30 +183,42 @@ def _insert_candidates(
     return uid_map
 
 
+def _uids_for_symbol(
+    uid_map: dict[tuple[str, str], str], sym: str,
+) -> list[str]:
+    """Return every candidate UID across engines for a given symbol."""
+    return [uid for (_eng, s), uid in uid_map.items() if s == sym]
+
+
 def _stamp_gate_decisions(
     conn,
     *,
-    candidate_uid_map: dict[str, str],
+    candidate_uid_map: dict[tuple[str, str], str],
     gate: GateResult,
 ) -> None:
-    """Write gate decisions + reasons + issue_type onto mef.candidate for every top-N symbol."""
+    """Write gate decisions onto EVERY engine's candidate row for a symbol.
+
+    The LLM's decision is per-symbol (it doesn't know which engine
+    produced the row it's reviewing), so the same decision applies to
+    every engine's candidate record for that symbol. This lets audit
+    queries attribute the gate outcome to the engine that contributed.
+    """
     if not gate.decisions:
         return
     with conn.cursor() as cur:
         for sym, dec in gate.decisions.items():
-            uid = candidate_uid_map.get(sym)
-            if not uid:
-                continue
-            cur.execute(
-                """
-                UPDATE mef.candidate
-                   SET llm_gate_decision   = %s,
-                       llm_gate_reason     = %s,
-                       llm_gate_issue_type = %s
-                 WHERE uid = %s
-                """,
-                (dec.decision, dec.reason, dec.issue_type, uid),
-            )
+            uids = _uids_for_symbol(candidate_uid_map, sym)
+            for uid in uids:
+                cur.execute(
+                    """
+                    UPDATE mef.candidate
+                       SET llm_gate_decision   = %s,
+                           llm_gate_reason     = %s,
+                           llm_gate_issue_type = %s
+                     WHERE uid = %s
+                    """,
+                    (dec.decision, dec.reason, dec.issue_type, uid),
+                )
     conn.commit()
 
 
@@ -246,8 +261,9 @@ def _insert_recommendations(
     conn,
     run_uid: str,
     survivors: list[RankedCandidate],
-    candidate_uid_map: dict[str, str],
+    candidate_uid_map: dict[tuple[str, str], str],
     gate: GateResult,
+    engine_scores: dict[str, dict[str, float]] | None = None,
 ) -> list[dict[str, Any]]:
     """Insert one recommendation row per approve / review / unavailable survivor.
 
@@ -256,7 +272,12 @@ def _insert_recommendations(
     recommendations so they can flow through the lifecycle (auto-activate
     on matching holding, get paper-scored, etc.). Email filtering happens
     downstream via the ``should_email`` flag.
+
+    ``engine_scores`` (optional) maps symbol → {engine: conviction}. When
+    provided, the recommendation's ``source_engines`` field is populated
+    with the list of all engines that picked the symbol in this run.
     """
+    engine_scores = engine_scores or {}
     emitted_rows: list[dict[str, Any]] = []
     with conn.cursor() as cur:
         for cand in survivors:
@@ -291,7 +312,7 @@ def _insert_recommendations(
                 )
                 """,
                 (
-                    uid, run_uid, candidate_uid_map[cand.symbol],
+                    uid, run_uid, candidate_uid_map[(cand.engine, cand.symbol)],
                     cand.symbol, cand.asset_kind, cand.posture,
                     cand.proposed_expression,
                     f"limit order {cand.proposed_entry_zone}" if cand.proposed_entry_zone else None,
@@ -304,10 +325,12 @@ def _insert_recommendations(
                     cand.conviction_score,
                     reasoning,
                     gate_reason,
-                    # Commit 1 always has exactly one engine (trend)
-                    # contributing per candidate. Multi-engine union
-                    # lands in later commits.
-                    [cand.engine],
+                    # Multi-engine source: every engine that picked this
+                    # symbol in this run contributes to source_engines.
+                    # Fall back to [cand.engine] when engine_scores isn't
+                    # wired (tests / legacy single-engine callers).
+                    sorted(engine_scores.get(cand.symbol, {cand.engine: 0}).keys())
+                        if engine_scores else [cand.engine],
                 ),
             )
             pnl = _estimated_pnl(cand)
@@ -544,20 +567,26 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
             candidate_uid_by_engine_symbol = _insert_candidates(
                 conn, run_uid, all_candidates,
             )
-            # Single-engine callers need {symbol: uid}. Commit 1 only has
-            # the trend engine registered so this flatten is 1:1. Once
-            # multi-engine lands, the gate + emission path will key by
-            # (engine, symbol) and this compat map goes away.
-            candidate_uid_map = {
-                sym: uid
-                for (eng, sym), uid in candidate_uid_by_engine_symbol.items()
-            }
 
-            top_n = select_for_emission(
+            # Per-engine top-N selection → dedup to unique-by-symbol
+            # for the LLM. Each engine contributes its own top-N; the
+            # LLM sees every symbol at most once, annotated with its
+            # per-engine conviction scores.
+            top_n_per_engine = int(ranker_cfg.get("top_n_per_engine", 3))
+            per_engine = select_per_engine(
                 all_candidates,
                 conviction_threshold=conviction_threshold,
-                max_new_ideas=max_new_ideas,
+                top_n_per_engine=top_n_per_engine,
             )
+            top_n, engine_scores = merge_for_llm(per_engine)
+
+            # Flat symbol → uid map for the LLM prompt's candidate_id
+            # field: the LLM sees one row per symbol, so we pick the
+            # specific engine's uid that matches the survivor.
+            prompt_uid_by_symbol = {
+                cand.symbol: candidate_uid_by_engine_symbol[(cand.engine, cand.symbol)]
+                for cand in top_n
+            }
 
             gate = apply_gate(
                 conn,
@@ -566,9 +595,15 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 as_of_date=evidence.as_of_date.isoformat(),
                 spy_return_20d=evidence.baseline.get("spy_return_20d"),
                 spy_return_63d=evidence.baseline.get("spy_return_63d"),
-                candidate_uids=candidate_uid_map,
+                candidate_uids=prompt_uid_by_symbol,
+                engine_scores=engine_scores,
+                max_new_ideas=max_new_ideas,
             )
-            _stamp_gate_decisions(conn, candidate_uid_map=candidate_uid_map, gate=gate)
+            _stamp_gate_decisions(
+                conn,
+                candidate_uid_map=candidate_uid_by_engine_symbol,
+                gate=gate,
+            )
             if not gate.available:
                 ow_event(
                     severity="warning", code="gate_unavailable",
@@ -577,9 +612,17 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 )
 
             emitted_rows = _insert_recommendations(
-                conn, run_uid, top_n, candidate_uid_map, gate,
+                conn, run_uid, top_n, candidate_uid_by_engine_symbol, gate,
+                engine_scores=engine_scores,
             )
-            emitted_uids = [candidate_uid_map[row["symbol"]] for row in emitted_rows]
+            # Mark every engine's candidate row for emitted symbols —
+            # all engines that picked the symbol contributed to the
+            # ultimate recommendation and should be visible in audit.
+            emitted_uids: list[str] = []
+            for row in emitted_rows:
+                emitted_uids.extend(
+                    _uids_for_symbol(candidate_uid_by_engine_symbol, row["symbol"])
+                )
             _mark_emitted(conn, emitted_uids)
 
             candidates_passed = sum(

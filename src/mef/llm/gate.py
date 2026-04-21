@@ -66,9 +66,25 @@ class GateResult:
     rejected: list[str] = field(default_factory=list)
     unavailable: list[str] = field(default_factory=list)
 
+    # The LLM's synthesis top-picks in order. Only symbols it approved.
+    # Empty list when the LLM chooses "no new trades today" or when
+    # the gate is unavailable. Populated only for multi-engine runs
+    # where the prompt asks for a synthesis block.
+    synthesis: list[str] = field(default_factory=list)
 
-def _candidate_payload(c: RankedCandidate, *, candidate_uid: str | None = None) -> dict[str, Any]:
-    """Serialize a RankedCandidate for prompt rendering."""
+
+def _candidate_payload(
+    c: RankedCandidate,
+    *,
+    candidate_uid: str | None = None,
+    engine_scores: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Serialize a RankedCandidate for prompt rendering.
+
+    `engine_scores` maps engine_name → conviction for this symbol
+    across any engines that picked it. Rendered into the candidate
+    line so the LLM can see engine agreement/disagreement.
+    """
     features = {**c.features}
     features.pop("bar_date", None)
     # Derive days_to_earnings at payload time so the LLM sees the
@@ -79,12 +95,20 @@ def _candidate_payload(c: RankedCandidate, *, candidate_uid: str | None = None) 
     days_to_earn = None
     if next_earn is not None and hasattr(next_earn, "year"):
         days_to_earn = (next_earn - bar_date).days
+    if engine_scores:
+        scores_str = " ".join(
+            f"{eng}={score:.2f}" for eng, score in engine_scores.items()
+        )
+    else:
+        scores_str = f"{c.engine}={c.conviction_score:.2f}"
     return {
         "candidate_id":         candidate_uid,
         "symbol":               c.symbol,
         "asset_kind":           c.asset_kind,
         "posture":              c.posture,
         "conviction_score":     c.conviction_score,
+        "engine":               c.engine,
+        "engine_scores_str":    scores_str,
         "features":             features,
         "proposed_expression":  c.proposed_expression,
         "proposed_entry_zone":  c.proposed_entry_zone,
@@ -109,8 +133,14 @@ def _coerce_issue_type(raw: Any, decision: str) -> str:
     return "none" if decision == "approve" else "missing_context"
 
 
-def _parse_gate_response(text: str) -> dict[str, tuple[str, str, str]]:
-    """Parse the LLM's JSON response into {symbol: (decision, issue_type, reason)}.
+def _parse_gate_response(
+    text: str,
+) -> tuple[dict[str, tuple[str, str, str]], list[str]]:
+    """Parse the LLM's JSON response into (reviews, synthesis).
+
+    Returns ({symbol: (decision, issue_type, reason)}, synthesis_list).
+    Synthesis is empty for single-engine prompts (old schema) or when
+    the LLM returns an empty array / a malformed synthesis field.
 
     Raises ValueError on unparseable or malformed shape. Per-row issue_type
     is validated/coerced; per-row decisions outside the allowed enum are
@@ -137,7 +167,19 @@ def _parse_gate_response(text: str) -> dict[str, tuple[str, str, str]]:
         reason = str(rev.get("reason") or "").strip()
         issue_type = _coerce_issue_type(rev.get("issue_type"), dec)
         out[sym] = (dec, issue_type, reason)
-    return out
+
+    # Synthesis is optional — single-engine prompts never emit one.
+    # Accept list of strings only; any other shape → empty list.
+    synthesis_raw = data.get("synthesis", [])
+    synthesis: list[str] = []
+    if isinstance(synthesis_raw, list):
+        for item in synthesis_raw:
+            if isinstance(item, str) and item:
+                # Only include symbols the LLM also approved in reviews.
+                rev = out.get(item)
+                if rev and rev[0] == "approve":
+                    synthesis.append(item)
+    return out, synthesis
 
 
 def _log_trace(
@@ -184,16 +226,29 @@ def apply_gate(
     spy_return_20d: float | None,
     spy_return_63d: float | None,
     candidate_uids: dict[str, str] | None = None,
+    engine_scores: dict[str, dict[str, float]] | None = None,
+    max_new_ideas: int = 5,
 ) -> GateResult:
     """Gate the survivors. ``candidate_uids`` maps symbol → candidate UID
     (e.g. ``C-000042``) so the prompt can include candidate_id and the
-    LLM's response can be matched back even if symbols are reordered."""
+    LLM's response can be matched back even if symbols are reordered.
+
+    ``engine_scores`` maps symbol → {engine_name: conviction} so the
+    prompt can show per-engine agreement/disagreement. When multiple
+    engines picked the same symbol, the LLM sees that fact. Single-
+    engine callers can omit it.
+    """
     if not survivors:
         return GateResult(decisions={}, available=True, llm_trace_uid=None)
 
     candidate_uids = candidate_uids or {}
+    engine_scores = engine_scores or {}
     payload = [
-        _candidate_payload(c, candidate_uid=candidate_uids.get(c.symbol))
+        _candidate_payload(
+            c,
+            candidate_uid=candidate_uids.get(c.symbol),
+            engine_scores=engine_scores.get(c.symbol),
+        )
         for c in survivors
     ]
     prompt = build_gate_prompt(
@@ -201,6 +256,7 @@ def apply_gate(
         as_of_date=as_of_date,
         spy_return_20d=spy_return_20d,
         spy_return_63d=spy_return_63d,
+        max_new_ideas=max_new_ideas,
     )
 
     symbols = [c.symbol for c in survivors]
@@ -219,7 +275,7 @@ def apply_gate(
         return result
 
     try:
-        parsed = _parse_gate_response(response.text)
+        parsed, synthesis = _parse_gate_response(response.text)
     except Exception as exc:
         trace_uid = _log_trace(
             conn, run_uid=run_uid, prompt=prompt, response=response,
@@ -268,4 +324,5 @@ def apply_gate(
         review=review,
         rejected=rejected,
         unavailable=unavailable,
+        synthesis=synthesis,
     )
