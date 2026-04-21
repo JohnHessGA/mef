@@ -616,13 +616,12 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 ),
             )
 
-            # Email gets only ideas with should_email=True (approve + unavailable).
-            # Review-tagged recs are saved to mef.recommendation but withheld from
-            # the email per user policy: keep the email brief and action-oriented.
+            # Email shows approved (+ unavailable, so an LLM outage doesn't
+            # silence MEF) as "New ideas", and review-tagged recs in a
+            # separate "Held for review" section with the LLM reasoning
+            # visible so the user can decide whether to act manually.
             email_ideas = [r for r in emitted_rows if r.get("should_email")]
-            withheld_review_count = sum(
-                1 for r in emitted_rows if r.get("llm_gate") == "review"
-            )
+            review_ideas = [r for r in emitted_rows if r.get("llm_gate") == "review"]
             email = render_daily_email(
                 when_kind=when_kind,
                 intent=_INTENT[when_kind],
@@ -631,10 +630,10 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 stocks_in_universe=counts["stocks"],
                 etfs_in_universe=counts["etfs"],
                 new_ideas=email_ideas,
+                review_ideas=review_ideas,
                 active_updates=[],
                 llm_gate_available=gate.available,
                 llm_gate_rejected=len(gate.rejected),
-                llm_gate_review=withheld_review_count,
                 staleness_warning=(freshness.message if freshness.should_warn else None),
             )
 

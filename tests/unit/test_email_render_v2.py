@@ -107,6 +107,48 @@ def test_review_only_no_rejected():
     assert "rejected" not in email.body.lower() or "Also from this run: 2 held" in email.body
 
 
+def test_review_ideas_render_in_dedicated_section_with_reasoning():
+    # When review_ideas is passed, the email must render them explicitly
+    # (not just a footer count) and must include each idea's LLM reasoning
+    # so the user can decide whether to act manually.
+    email = render_daily_email(
+        when_kind="postmarket", intent="next_trading_day",
+        run_uid="DR-9", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(symbol="WMT")],
+        review_ideas=[
+            _idea(
+                rec_uid="R-REV-1", symbol="TSLA", llm_gate="review",
+                reasoning_summary="RSI extended, entering near peak after -18% drawdown",
+            ),
+            _idea(
+                rec_uid="R-REV-2", symbol="AEP", llm_gate="review",
+                reasoning_summary="Current price exceeds entry range; MACD nearly flat",
+            ),
+        ],
+    )
+    body = email.body
+    assert "Held for review (2)" in body
+    assert "TSLA" in body and "AEP" in body
+    assert "RSI extended" in body
+    assert "MACD nearly flat" in body
+    # When review_ideas are rendered, the footer must NOT double-count them.
+    assert "held for review (logged" not in body
+
+
+def test_review_footer_count_fallback_when_ideas_not_passed():
+    # Staleness / abort paths may still pass only the integer count.
+    # That path should keep rendering the footer summary.
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-10", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea()],
+        llm_gate_review=3,
+    )
+    assert "3 held for review" in email.body
+
+
 def test_staleness_warning_banner_when_warn_only():
     email = render_daily_email(
         when_kind="premarket", intent="today_after_10am",

@@ -82,7 +82,13 @@ def _build_idea(rec: dict[str, Any]) -> dict[str, Any]:
             fjson = json.loads(fjson)
         except Exception:
             fjson = {}
-    pnl = _estimated_pnl(fjson.get("close"), rec.get("stop_level"), rec.get("target_level"))
+    close = fjson.get("close")
+    pnl = _estimated_pnl(close, rec.get("stop_level"), rec.get("target_level"))
+    # `needs_pullback` isn't persisted on mef.candidate; infer it from the
+    # same rule the ranker uses (drawdown_current > -0.03). Stable as long
+    # as the threshold stays in sync with ranker._score_symbol.
+    dd = fjson.get("drawdown_current")
+    needs_pullback = dd is not None and dd > -0.03
     return {
         "rec_uid":           rec["uid"],
         "symbol":            rec["symbol"],
@@ -96,6 +102,8 @@ def _build_idea(rec: dict[str, Any]) -> dict[str, Any]:
         "llm_gate":          rec.get("llm_gate_decision") or "unavailable",
         "issue_type":        rec.get("llm_gate_issue_type"),
         "reasoning_summary": rec.get("reasoning_summary"),
+        "needs_pullback":    needs_pullback,
+        "current_price":     close,
         **pnl,
     }
 
@@ -134,6 +142,7 @@ def run(args) -> int:
 
     ideas = [_build_idea(r) for r in recs]
     email_ideas = [i for i in ideas if i["llm_gate"] in ("approve", "unavailable")]
+    review_ideas = [i for i in ideas if i["llm_gate"] == "review"]
 
     email = render_daily_email(
         when_kind=run_when,
@@ -143,10 +152,10 @@ def run(args) -> int:
         stocks_in_universe=int(stocks),
         etfs_in_universe=int(etfs),
         new_ideas=email_ideas,
+        review_ideas=review_ideas,
         active_updates=[],
         llm_gate_available=("unavailable" not in gate_counts or len(gate_counts) > 1),
         llm_gate_rejected=gate_counts.get("reject", 0),
-        llm_gate_review=gate_counts.get("review", 0),
     )
 
     print(f"Subject: {email.subject}")

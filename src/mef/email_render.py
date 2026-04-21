@@ -93,6 +93,7 @@ def render_daily_email(
     stocks_in_universe: int,
     etfs_in_universe: int,
     new_ideas: list[dict[str, Any]] | None = None,
+    review_ideas: list[dict[str, Any]] | None = None,
     active_updates: list[dict[str, Any]] | None = None,
     recent_score_summary: str | None = None,
     llm_gate_available: bool = True,
@@ -102,6 +103,7 @@ def render_daily_email(
     staleness_aborted: bool = False,
 ) -> RenderedEmail:
     new_ideas = new_ideas or []
+    review_ideas = review_ideas or []
     active_updates = active_updates or []
 
     subject_prefix = _SUBJECT_PREFIX.get(when_kind, "MEF report")
@@ -145,11 +147,24 @@ def render_daily_email(
         for idx, idea in enumerate(new_ideas, start=1):
             lines.extend(_idea_lines(idx, idea))
 
-    # Quiet footer noting what was withheld from the email — concise.
-    # Both review and reject items live in the DB; the user can pull them
-    # via `mef recommendations --state proposed` and `mef rejections`.
+    # Held-for-review ideas: fully rendered so the user can see the LLM's
+    # concern + the setup, and decide whether to act manually. Not part
+    # of the "approved for auto-ship" list — visually separated.
+    if review_ideas:
+        lines.append("")
+        lines.append(
+            f"Held for review ({len(review_ideas)}) — LLM flagged these "
+            f"for human attention, not auto-ship:"
+        )
+        for idx, idea in enumerate(review_ideas, start=1):
+            lines.extend(_idea_lines(idx, idea))
+
+    # Quiet footer: only rejected count now. Review items are rendered
+    # explicitly above, so summarizing them as a count here would be
+    # redundant. ``llm_gate_review`` stays as a fallback count for paths
+    # that don't pass the full ``review_ideas`` list (e.g. stale-data abort).
     held_parts: list[str] = []
-    if llm_gate_review:
+    if not review_ideas and llm_gate_review:
         held_parts.append(f"{llm_gate_review} held for review")
     if llm_gate_rejected:
         held_parts.append(f"{llm_gate_rejected} rejected")
