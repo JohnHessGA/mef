@@ -149,6 +149,46 @@ def test_review_footer_count_fallback_when_ideas_not_passed():
     assert "3 held for review" in email.body
 
 
+def test_earnings_annotation_on_idea_line():
+    from datetime import date as _date, timedelta as _td
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-E1", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(next_earnings_date=_date.today() + _td(days=14))],
+    )
+    assert "📅 earnings in 14d" in email.body
+
+
+def test_upcoming_macro_banner_in_header():
+    from datetime import date as _date, timedelta as _td
+    events = [
+        {"date": _date.today() + _td(days=1), "event": "Retail Sales MoM (Mar)"},
+        {"date": _date.today() + _td(days=2), "event": "Fed Interest Rate Decision"},
+    ]
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-M1", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea()],
+        upcoming_macro_events=events,
+    )
+    assert "Upcoming high-impact US macro events" in email.body
+    assert "Retail Sales MoM" in email.body
+    assert "Fed Interest Rate Decision" in email.body
+
+
+def test_macro_banner_hidden_when_no_events():
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-M2", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea()],
+        upcoming_macro_events=[],
+    )
+    assert "Upcoming high-impact" not in email.body
+
+
 def test_staleness_warning_banner_when_warn_only():
     email = render_daily_email(
         when_kind="premarket", intent="today_after_10am",

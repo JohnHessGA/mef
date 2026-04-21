@@ -45,7 +45,24 @@ def _idea_lines(idx: int, idea: dict[str, Any]) -> list[str]:
     symbol = idea.get("symbol", "?")
     posture = idea.get("posture", "?")
     expression = idea.get("expression", "?")
-    lines = [f"  {idx}. {symbol} — {posture} — {expression}"]
+    header = f"  {idx}. {symbol} — {posture} — {expression}"
+    # Earnings annotation on the symbol line when an announcement is
+    # within the caution horizon (≤21 days). Informational only — the
+    # ranker already vetoed or penalized per its own thresholds, so by
+    # the time an idea hits the email this is context, not a warning.
+    next_earn = idea.get("next_earnings_date")
+    if next_earn is not None:
+        from datetime import date as _date
+        if hasattr(next_earn, "days"):  # guard against bad types
+            pass
+        try:
+            today = _date.today()
+            days_to_earn = (next_earn - today).days if hasattr(next_earn, "year") else None
+            if days_to_earn is not None and 0 <= days_to_earn <= 21:
+                header += f"  📅 earnings in {days_to_earn}d"
+        except Exception:
+            pass
+    lines = [header]
 
     entry_zone = idea.get("entry_zone")
     if entry_zone:
@@ -101,10 +118,12 @@ def render_daily_email(
     llm_gate_review: int = 0,
     staleness_warning: str | None = None,
     staleness_aborted: bool = False,
+    upcoming_macro_events: list[dict[str, Any]] | None = None,
 ) -> RenderedEmail:
     new_ideas = new_ideas or []
     review_ideas = review_ideas or []
     active_updates = active_updates or []
+    upcoming_macro_events = upcoming_macro_events or []
 
     subject_prefix = _SUBJECT_PREFIX.get(when_kind, "MEF report")
     date_label = started_at.strftime("%Y-%m-%d")
@@ -138,6 +157,15 @@ def render_daily_email(
 
     if not llm_gate_available and not staleness_aborted:
         lines.append("⚠ LLM gate was unavailable for this run — ideas below were not reviewed.")
+        lines.append("")
+
+    if upcoming_macro_events and not staleness_aborted:
+        lines.append("📅 Upcoming high-impact US macro events:")
+        for ev in upcoming_macro_events[:6]:
+            d = ev.get("date")
+            e = ev.get("event", "?")
+            dstr = d.isoformat() if hasattr(d, "isoformat") else str(d)
+            lines.append(f"   - {dstr}  {e}")
         lines.append("")
 
     lines.append(f"New ideas ({len(new_ideas)}):")

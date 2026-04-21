@@ -313,6 +313,7 @@ def _insert_recommendations(
                 "reasoning_summary": reasoning,
                 "needs_pullback":    cand.needs_pullback,
                 "current_price":     cand.features.get("close"),
+                "next_earnings_date": cand.features.get("next_earnings_date"),
                 **pnl,
             })
     conn.commit()
@@ -635,6 +636,7 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 llm_gate_available=gate.available,
                 llm_gate_rejected=len(gate.rejected),
                 staleness_warning=(freshness.message if freshness.should_warn else None),
+                upcoming_macro_events=evidence.baseline.get("upcoming_high_impact_events"),
             )
 
             if dry_run:

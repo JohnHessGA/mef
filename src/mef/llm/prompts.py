@@ -218,6 +218,7 @@ def render_candidates_block(candidates: list[dict[str, Any]]) -> str:
             f"symbol={c['symbol']} ({c['asset_kind']}) "
             f"posture={c['posture']} conviction={c['conviction_score']:.2f} "
             f"pullback_setup={str(bool(c.get('needs_pullback'))).lower()} "
+            f"days_to_earnings={c.get('days_to_earnings') if c.get('days_to_earnings') is not None else 'n/a'} "
             f"close={_fmt(fx.get('close'), '{:.2f}')} "
             f"ret5d={_fmt_pct(fx.get('return_5d'))} "
             f"ret20d={_fmt_pct(fx.get('return_20d'))} "

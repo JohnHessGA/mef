@@ -89,21 +89,30 @@ def _build_idea(rec: dict[str, Any]) -> dict[str, Any]:
     # as the threshold stays in sync with ranker._score_symbol.
     dd = fjson.get("drawdown_current")
     needs_pullback = dd is not None and dd > -0.03
+    next_earn = fjson.get("next_earnings_date")
+    # feature_json stores dates as ISO strings; parse back for the email.
+    if isinstance(next_earn, str):
+        try:
+            from datetime import date as _date
+            next_earn = _date.fromisoformat(next_earn)
+        except Exception:
+            next_earn = None
     return {
-        "rec_uid":           rec["uid"],
-        "symbol":            rec["symbol"],
-        "asset_kind":        rec["asset_kind"],
-        "posture":           rec["posture"],
-        "expression":        rec["expression"],
-        "entry_zone":        rec.get("proposed_entry_zone"),
-        "stop":              rec.get("stop_level"),
-        "target":            rec.get("target_level"),
-        "time_exit":         rec.get("time_exit_date"),
-        "llm_gate":          rec.get("llm_gate_decision") or "unavailable",
-        "issue_type":        rec.get("llm_gate_issue_type"),
-        "reasoning_summary": rec.get("reasoning_summary"),
-        "needs_pullback":    needs_pullback,
-        "current_price":     close,
+        "rec_uid":            rec["uid"],
+        "symbol":             rec["symbol"],
+        "asset_kind":         rec["asset_kind"],
+        "posture":            rec["posture"],
+        "expression":         rec["expression"],
+        "entry_zone":         rec.get("proposed_entry_zone"),
+        "stop":               rec.get("stop_level"),
+        "target":             rec.get("target_level"),
+        "time_exit":          rec.get("time_exit_date"),
+        "llm_gate":           rec.get("llm_gate_decision") or "unavailable",
+        "issue_type":         rec.get("llm_gate_issue_type"),
+        "reasoning_summary":  rec.get("reasoning_summary"),
+        "needs_pullback":     needs_pullback,
+        "current_price":      close,
+        "next_earnings_date": next_earn,
         **pnl,
     }
 
@@ -144,6 +153,25 @@ def run(args) -> int:
     email_ideas = [i for i in ideas if i["llm_gate"] in ("approve", "unavailable")]
     review_ideas = [i for i in ideas if i["llm_gate"] == "review"]
 
+    # Upcoming macro events for the header banner — same source the live
+    # pipeline uses (shdb.economic_calendar, today + 3 days).
+    from datetime import date as _date, timedelta as _td
+    upcoming_events: list[dict[str, Any]] = []
+    try:
+        from mef.db.connection import connect_shdb
+        s = connect_shdb()
+        with s.cursor() as scur:
+            scur.execute(
+                "SELECT bar_date, event FROM shdb.economic_calendar "
+                "WHERE country='US' AND impact='High' "
+                "  AND bar_date BETWEEN %s AND %s ORDER BY bar_date, event",
+                (_date.today(), _date.today() + _td(days=3)),
+            )
+            upcoming_events = [{"date": r[0], "event": r[1]} for r in scur.fetchall()]
+        s.close()
+    except Exception:
+        pass  # report command is read-only; silently skip banner on any issue
+
     email = render_daily_email(
         when_kind=run_when,
         intent=intent,
@@ -156,6 +184,7 @@ def run(args) -> int:
         active_updates=[],
         llm_gate_available=("unavailable" not in gate_counts or len(gate_counts) > 1),
         llm_gate_rejected=gate_counts.get("reject", 0),
+        upcoming_macro_events=upcoming_events,
     )
 
     print(f"Subject: {email.subject}")

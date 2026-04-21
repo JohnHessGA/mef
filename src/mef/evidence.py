@@ -45,7 +45,7 @@ SECTOR_TO_ETF = {
 @dataclass(frozen=True)
 class EvidenceBundle:
     as_of_date: date
-    baseline: dict[str, Any]               # {"spy_return_20d": ..., "spy_return_63d": ...}
+    baseline: dict[str, Any]               # SPY returns, sector returns, upcoming macro events
     symbols: dict[str, dict[str, Any]]     # {"AAPL": {...features...}, ...}
 
 
@@ -213,6 +213,51 @@ def _rows_to_dict(cur, asset_kind: str) -> dict[str, dict[str, Any]]:
     return out
 
 
+_UPCOMING_EARNINGS_SQL = """
+SELECT symbol, MIN(announcement_date) AS next_earnings_date
+  FROM shdb.earnings_calendar_upcoming
+ WHERE symbol = ANY(%s)
+   AND announcement_date >= %s
+ GROUP BY symbol
+"""
+
+# Upcoming macro-calendar events — scalar per run (not per symbol), so
+# scoped to a single bundle-level fetch. Only US High-impact events
+# within a short horizon count; lower-impact events are routine noise.
+_UPCOMING_MACRO_EVENTS_SQL = """
+SELECT bar_date, event
+  FROM shdb.economic_calendar
+ WHERE country = 'US' AND impact = 'High'
+   AND bar_date BETWEEN %s AND %s
+ ORDER BY bar_date, event
+"""
+
+
+def _fetch_earnings_context(symbols: list[str], as_of: date) -> dict[str, date]:
+    """Return {symbol: next_earnings_date} for each symbol with an upcoming announcement."""
+    if not symbols:
+        return {}
+    conn = connect_shdb()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(_UPCOMING_EARNINGS_SQL, (symbols, as_of))
+            return {row[0]: row[1] for row in cur.fetchall()}
+    finally:
+        conn.close()
+
+
+def _fetch_upcoming_macro_events(as_of: date, horizon_days: int = 3) -> list[dict[str, Any]]:
+    """Return upcoming US High-impact macro events within the horizon."""
+    from datetime import timedelta
+    conn = connect_shdb()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(_UPCOMING_MACRO_EVENTS_SQL, (as_of, as_of + timedelta(days=horizon_days)))
+            return [{"date": row[0], "event": row[1]} for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 def pull_latest_evidence() -> EvidenceBundle:
     """Pull the latest-bar evidence for every universe symbol with coverage.
 
@@ -247,10 +292,21 @@ def pull_latest_evidence() -> EvidenceBundle:
         for etf in SECTOR_TO_ETF.values()
         if etf in etfs and etfs[etf].get("return_63d") is not None
     }
+    # Upcoming earnings dates per stock — stitched into each stock's
+    # feature dict. Coverage ≈99% of the universe; symbols without an
+    # upcoming announcement just get next_earnings_date=None.
+    earnings_map = _fetch_earnings_context(stock_symbols, as_of)
+    for sym, row in stocks.items():
+        row["next_earnings_date"] = earnings_map.get(sym)
+
+    # Upcoming macro events — bundle-level scalar (not per symbol).
+    upcoming_macro_events = _fetch_upcoming_macro_events(as_of, horizon_days=3)
+
     baseline = {
-        "spy_return_20d":     spy_row.get("return_20d"),
-        "spy_return_63d":     spy_row.get("return_63d"),
-        "sector_returns_63d": sector_returns_63d,
+        "spy_return_20d":              spy_row.get("return_20d"),
+        "spy_return_63d":              spy_row.get("return_63d"),
+        "sector_returns_63d":          sector_returns_63d,
+        "upcoming_high_impact_events": upcoming_macro_events,
     }
 
     return EvidenceBundle(as_of_date=as_of, baseline=baseline, symbols=symbols)

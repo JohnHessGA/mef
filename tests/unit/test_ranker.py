@@ -124,6 +124,81 @@ def test_select_for_emission_applies_threshold_and_cap():
     assert len(survivors_capped) == 1
 
 
+def test_earnings_within_5_days_vetos_any_posture():
+    near = _row(symbol="N", next_earnings_date=date(2026, 4, 20))
+    # bar_date default 2026-04-17 → 3 days to earnings
+    cand = rank(_bundle({"N": near}))[0]
+    assert cand.posture == POSTURE_NO_EDGE
+    assert any("earnings in 3d" in n for n in cand.reasoning_notes)
+
+
+def test_earnings_within_10_days_penalizes_non_pullback():
+    # 8 days out, no pullback flag — penalty, not veto.
+    row = _row(symbol="P", drawdown_current=-0.10,  # not at peak → no pullback
+               next_earnings_date=date(2026, 4, 25))
+    cand = rank(_bundle({"P": row}))[0]
+    assert cand.posture != POSTURE_NO_EDGE
+    assert any("earnings in 8d → penalty" in n for n in cand.reasoning_notes)
+
+
+def test_earnings_within_10_days_vetos_pullback_setup():
+    # 8 days out AND at-peak pullback setup — wider veto window applies.
+    row = _row(symbol="PB", drawdown_current=-0.01,  # at peak → pullback flag
+               next_earnings_date=date(2026, 4, 25))
+    cand = rank(_bundle({"PB": row}))[0]
+    assert cand.posture == POSTURE_NO_EDGE
+    assert any("earnings in 8d → veto" in n for n in cand.reasoning_notes)
+
+
+def test_earnings_21_days_out_only_flags():
+    row = _row(symbol="F", next_earnings_date=date(2026, 5, 5))  # 18 days out
+    cand = rank(_bundle({"F": row}))[0]
+    assert cand.posture != POSTURE_NO_EDGE
+    assert any("earnings in 18d → caution" in n for n in cand.reasoning_notes)
+
+
+def test_earnings_none_no_rule_fires():
+    row = _row(symbol="X", next_earnings_date=None)
+    cand = rank(_bundle({"X": row}))[0]
+    assert not any("earnings in" in n for n in cand.reasoning_notes)
+
+
+def test_macro_event_today_or_tomorrow_dampens():
+    # A high-impact event on the bundle's as_of_date (zero days out).
+    baseline_with_event = {
+        "spy_return_20d": 0.01, "spy_return_63d": 0.02,
+        "sector_returns_63d": {},
+        "upcoming_high_impact_events": [{"date": date(2026, 4, 17), "event": "CPI MoM"}],
+    }
+    from mef.evidence import EvidenceBundle
+    bundle = EvidenceBundle(
+        as_of_date=date(2026, 4, 17), baseline=baseline_with_event,
+        symbols={"M": _row(symbol="M")},
+    )
+    bundle_noevent = _bundle({"M": _row(symbol="M")})
+
+    with_ev = rank(bundle)[0]
+    without_ev = rank(bundle_noevent)[0]
+    assert with_ev.conviction_score < without_ev.conviction_score
+    assert any("macro event CPI MoM" in n for n in with_ev.reasoning_notes)
+
+
+def test_macro_event_3_days_out_does_not_dampen():
+    # Event 3 days out — outside the 0-1 window, no penalty.
+    far_event = {
+        "spy_return_20d": 0.01, "spy_return_63d": 0.02,
+        "sector_returns_63d": {},
+        "upcoming_high_impact_events": [{"date": date(2026, 4, 20), "event": "NFP"}],
+    }
+    from mef.evidence import EvidenceBundle
+    bundle = EvidenceBundle(
+        as_of_date=date(2026, 4, 17), baseline=far_event,
+        symbols={"M": _row(symbol="M")},
+    )
+    cand = rank(bundle)[0]
+    assert not any("macro event" in n for n in cand.reasoning_notes)
+
+
 def test_negative_fcf_vetos_regardless_of_momentum():
     # Even a perfectly trending stock is vetoed if TTM FCF is negative.
     cand = rank(_bundle({"BURN": _row(symbol="BURN", free_cash_flow=-1e9)}))[0]

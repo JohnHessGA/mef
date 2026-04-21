@@ -258,6 +258,58 @@ def _score_symbol(symbol: str, row: dict[str, Any], baseline: dict[str, Any]) ->
         base -= 0.15
         notes.append(f"deep drawdown {drawdown:.1%} → penalty")
 
+    # At/near recent peak → patient entry only. Computed here (rather
+    # than at the end) so the earnings-proximity rule below can widen
+    # its veto window for pullback setups specifically.
+    needs_pullback = drawdown is not None and drawdown > -0.03
+    if needs_pullback:
+        notes.append(f"at recent peak (dd {drawdown:+.1%}) → wait for pullback")
+
+    # Earnings-proximity gate — stocks only. An upcoming earnings
+    # announcement makes any technical thesis contingent on a binary
+    # event the ranker can't see. Veto (no_edge) when close, penalty
+    # when near, flag when on-horizon.
+    if row.get("asset_kind") == "stock":
+        next_earn = row.get("next_earnings_date")
+        bar_date = row.get("bar_date") or date.today()
+        if next_earn is not None:
+            days_to_earn = (next_earn - bar_date).days
+            # Pullback setups depend on gradual price action; an
+            # earnings gap nullifies that assumption, so the veto
+            # window is wider for them.
+            pullback_veto_window = 10
+            general_veto_window = 5
+            penalty_window = 10
+            flag_window = 21
+            if (needs_pullback and 0 <= days_to_earn <= pullback_veto_window) \
+               or (0 <= days_to_earn <= general_veto_window):
+                posture = POSTURE_NO_EDGE
+                base = 0.0
+                notes.append(f"earnings in {days_to_earn}d → veto")
+            elif 0 <= days_to_earn <= penalty_window:
+                base -= 0.15
+                notes.append(f"earnings in {days_to_earn}d → penalty")
+            elif 0 <= days_to_earn <= flag_window:
+                base -= 0.03
+                notes.append(f"earnings in {days_to_earn}d → caution")
+
+    # Macro-event dampener — applies universe-wide (all emittable
+    # postures). Small -0.05 nudge when a US High-impact macro
+    # release lands today or tomorrow. Not a veto: individual stocks
+    # can still rise through macro releases, it's just a "maybe don't
+    # start today" signal.
+    if posture in (POSTURE_BULLISH, POSTURE_RANGE_BOUND):
+        events = baseline.get("upcoming_high_impact_events") or []
+        bar_date_for_events = row.get("bar_date") or date.today()
+        for ev in events:
+            days_to_ev = (ev["date"] - bar_date_for_events).days
+            if 0 <= days_to_ev <= 1:
+                base -= 0.05
+                notes.append(
+                    f"high-impact macro event {ev['event']} in {days_to_ev}d"
+                )
+                break  # one penalty max, even on multi-event days
+
     # Fundamental sanity — stocks only (ETFs have NULL fundamentals,
     # and the rule wouldn't make sense applied to them anyway). Hard
     # veto on negative TTM free cash flow: no amount of technical
@@ -284,12 +336,6 @@ def _score_symbol(symbol: str, row: dict[str, Any], baseline: dict[str, Any]) ->
     # Anything that barely scored is just no_edge.
     if conviction < 0.40:
         posture = POSTURE_NO_EDGE
-
-    # At/near recent peak → patient entry only, regardless of conviction.
-    # Threshold is symmetric with the SMA50 extension check above.
-    needs_pullback = drawdown is not None and drawdown > -0.03
-    if needs_pullback:
-        notes.append(f"at recent peak (dd {drawdown:+.1%}) → wait for pullback")
 
     return RankedCandidate(
         symbol=symbol,

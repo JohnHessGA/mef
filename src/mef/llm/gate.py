@@ -71,6 +71,14 @@ def _candidate_payload(c: RankedCandidate, *, candidate_uid: str | None = None) 
     """Serialize a RankedCandidate for prompt rendering."""
     features = {**c.features}
     features.pop("bar_date", None)
+    # Derive days_to_earnings at payload time so the LLM sees the
+    # scalar instead of a raw date string.
+    from datetime import date as _date
+    next_earn = features.get("next_earnings_date")
+    bar_date = c.features.get("bar_date") or _date.today()
+    days_to_earn = None
+    if next_earn is not None and hasattr(next_earn, "year"):
+        days_to_earn = (next_earn - bar_date).days
     return {
         "candidate_id":         candidate_uid,
         "symbol":               c.symbol,
@@ -84,6 +92,7 @@ def _candidate_payload(c: RankedCandidate, *, candidate_uid: str | None = None) 
         "proposed_target":      c.proposed_target,
         "proposed_time_exit":   c.proposed_time_exit.isoformat() if c.proposed_time_exit else None,
         "needs_pullback":       c.needs_pullback,
+        "days_to_earnings":     days_to_earn,
     }
 
 
