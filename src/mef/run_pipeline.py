@@ -34,8 +34,8 @@ from mef.evidence import EvidenceBundle, FreshnessReport, check_freshness, pull_
 from mef.lifecycle import sweep as lifecycle_sweep
 from mef.llm.gate import GateResult, apply_gate
 from mef.ranker import (
-    RankedCandidate, rank, select_for_emission,
-    select_per_engine, merge_for_llm,
+    EMITTABLE_POSTURES, RankedCandidate, classify_outcomes, rank,
+    select_for_emission, select_per_engine, merge_for_llm,
 )
 from mef.paper_scoring import paper_score_emitted
 from mef.pnl_tracking import snapshot_daily_pnl
@@ -144,30 +144,55 @@ def _json_safe(features: dict[str, Any]) -> dict[str, Any]:
 
 def _insert_candidates(
     conn, run_uid: str, candidates: list[RankedCandidate],
+    outcomes: dict[tuple[str, str], dict[str, Any]],
 ) -> dict[tuple[str, str], str]:
     """Insert one candidate row per (engine, symbol). Returns {(engine, symbol): uid}.
 
-    Keyed by (engine, symbol) rather than just symbol because the same
-    symbol can legitimately appear in multiple engines in the same run
-    — trend and value may both pick JNJ, for example.
+    Persists the full Layer-A/B/C decomposition: eligibility flags,
+    raw vs final conviction, hazard-penalty components, and the
+    pre-LLM selection / suppression outcome. ``outcomes`` comes from
+    ``ranker.classify_outcomes`` and is keyed by (engine, symbol).
     """
     uid_map: dict[tuple[str, str], str] = {}
     with conn.cursor() as cur:
         for cand in candidates:
             uid = next_uid(conn, "candidate")
+            key = (cand.engine, cand.symbol)
+            outcome = outcomes.get(key) or {}
             cur.execute(
                 """
                 INSERT INTO mef.candidate (
                     uid, run_uid, symbol, asset_kind, posture, conviction_score,
+                    raw_conviction,
+                    hazard_penalty_total, hazard_penalty_macro,
+                    hazard_penalty_earnings_prox, hazard_event_type, hazard_flags,
+                    selected_pre_llm, suppressed_by_hazard,
+                    eligibility_pass, eligibility_fail_reasons,
                     feature_json, proposed_expression, proposed_entry_zone,
                     proposed_stop, proposed_target, proposed_time_exit, emitted,
                     engine
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (
+                    %s, %s, %s, %s, %s, %s,
+                    %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s,
+                    %s, %s,
+                    %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s
+                )
                 """,
                 (
                     uid, run_uid, cand.symbol, cand.asset_kind,
                     cand.posture, cand.conviction_score,
+                    cand.raw_conviction,
+                    cand.hazard_penalty_total, cand.hazard_penalty_macro,
+                    cand.hazard_penalty_earnings_prox, cand.hazard_event_type,
+                    list(cand.hazard_flags),
+                    bool(outcome.get("selected_pre_llm", False)),
+                    bool(outcome.get("suppressed_by_hazard", False)),
+                    cand.eligibility_pass, list(cand.eligibility_fail_reasons),
                     json.dumps(_json_safe(cand.features)),
                     cand.proposed_expression,
                     cand.proposed_entry_zone,
@@ -566,9 +591,13 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                     max_new_ideas=max_new_ideas,
                 )
 
-            all_candidates = rank(evidence)
+            hazard_config = ranker_cfg.get("hazard_overlay") or {}
+            all_candidates = rank(evidence, hazard_config=hazard_config)
+            outcomes = classify_outcomes(
+                all_candidates, conviction_threshold=conviction_threshold,
+            )
             candidate_uid_by_engine_symbol = _insert_candidates(
-                conn, run_uid, all_candidates,
+                conn, run_uid, all_candidates, outcomes,
             )
 
             # Per-engine top-N selection → dedup to unique-by-symbol
@@ -629,8 +658,7 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
             _mark_emitted(conn, emitted_uids)
 
             candidates_passed = sum(
-                1 for c in all_candidates
-                if c.posture in ("bullish", "range_bound")
+                1 for c in all_candidates if c.posture in EMITTABLE_POSTURES
             )
             symbols_evaluated = len(all_candidates)
 

@@ -1,7 +1,8 @@
-"""Shadow scoring for LLM-rejected candidates.
+"""Shadow scoring for LLM-rejected AND hazard-suppressed candidates.
 
-For every candidate where ``llm_gate_decision = 'reject'``, we
-forward-simulate the trade that *would* have been emitted, using:
+For every candidate where ``llm_gate_decision = 'reject'`` OR
+``suppressed_by_hazard = TRUE``, we forward-simulate the trade that
+*would* have been emitted, using:
 
 - entry_price = the candidate's ``feature_json->>'close'`` (same anchor
   real recs use as their entry mid in ``run_pipeline._estimated_pnl``)
@@ -22,15 +23,21 @@ stop/target was hit yet and ``proposed_time_exit`` hasn't passed. Those
 candidates are picked up automatically in a future run once enough data
 has accrued. This makes the function idempotent and incremental.
 
-Why this exists: without it, the LLM gate is unfalsifiable. Logging a
-rejection is not enough — we need to know whether the rejection was
-right. Comparing the outcome distribution of approved (``mef.score``)
-vs rejected (``mef.shadow_score``) tells us if the gate is helping.
+Why this exists: without it, the LLM gate and the hazard overlay are
+both unfalsifiable. Logging a rejection / suppression is not enough —
+we need to know whether it was right. Comparing the outcome distribution
+of approved (``mef.score``) vs rejected + suppressed (``mef.shadow_score``)
+tells us whether the gate and overlay are earning their keep.
+
+The ``gate_decision`` column carries the reason the candidate was not
+emitted — either the LLM's decision (``reject``) or the sentinel value
+``hazard_suppressed`` for Layer B suppressions.
 
 NOT backtesting: a backtest simulates a strategy over arbitrary history.
-Shadow scoring only evaluates live decisions made by MEF (rejected at
-time T) against subsequently-realized prices — same forward-test
-discipline real recs use, just keyed on candidate_uid instead of rec_uid.
+Shadow scoring only evaluates live decisions made by MEF (rejected /
+suppressed at time T) against subsequently-realized prices — same
+forward-test discipline real recs use, just keyed on candidate_uid
+instead of rec_uid.
 """
 
 from __future__ import annotations
@@ -60,18 +67,33 @@ def _existing_shadow_uids(conn) -> set[str]:
 
 
 def _rejected_candidates(conn) -> list[dict[str, Any]]:
-    """Return rejected candidates joined to their parent run's start date."""
+    """Return shadow-scorable candidates joined to their parent run's start date.
+
+    A candidate is shadow-scorable when MEF saw a real thesis but did not
+    emit: either the LLM rejected it, or Layer B hazard overlay suppressed
+    it. Both paths have a draft plan (stop/target/time_exit) and a raw
+    thesis worth forward-walking.
+
+    The materialized ``shadow_gate_decision`` column is the value to
+    persist in ``mef.shadow_score.gate_decision`` — the literal
+    ``llm_gate_decision`` when the LLM rejected, or the sentinel
+    ``hazard_suppressed`` when the overlay did.
+    """
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT c.uid, c.symbol, c.asset_kind, c.engine,
                    c.proposed_stop, c.proposed_target, c.proposed_time_exit,
                    c.feature_json,
-                   c.llm_gate_decision,
+                   CASE
+                     WHEN c.llm_gate_decision = 'reject' THEN 'reject'
+                     WHEN c.suppressed_by_hazard          THEN 'hazard_suppressed'
+                   END AS shadow_gate_decision,
                    d.started_at::date AS run_date
               FROM mef.candidate c
               JOIN mef.daily_run  d ON d.uid = c.run_uid
              WHERE c.llm_gate_decision = 'reject'
+                OR c.suppressed_by_hazard = TRUE
              ORDER BY d.started_at
             """
         )
@@ -196,7 +218,7 @@ def _score_one(conn, cand: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    score_uid, cand["uid"], cand["llm_gate_decision"], "timeout",
+                    score_uid, cand["uid"], cand["shadow_gate_decision"], "timeout",
                     entry_price, None, entry_date, None, None,
                     None, None, sector_etf, None,
                     "no mart bars between entry+1 and time_exit",
@@ -231,7 +253,7 @@ def _score_one(conn, cand: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
-                score_uid, cand["uid"], cand["llm_gate_decision"], outcome,
+                score_uid, cand["uid"], cand["shadow_gate_decision"], outcome,
                 entry_price, exit_price, entry_date, exit_date, days_held,
                 round(pnl_100sh, 2),
                 spy_ret,
