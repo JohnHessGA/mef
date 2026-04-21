@@ -716,9 +716,15 @@ Header
    - 2026-04-29  Fed Interest Rate Decision   has events in 0-3 day horizon
    - 2026-04-30  Core PCE Price Index MoM (Mar)
 
+⚠ LLM gate was unavailable for this run due to LLM timeouts   ← only on
+   — ideas below were not reviewed.                              gate outages
+
 New ideas (K):  ← LLM-approved + unavailable-fallback
-  1. SYMBOL — posture — expression  [📅 earnings in 14d]  ← if ≤21 days
+  1. SYMBOL[:etf] ($price) — posture — expression  [engine: …]  [📅 earnings in 14d]
+     Rec ID:     R-000xxx
      Entry zone: $LOW-$HIGH     [⏳ wait for pullback (currently ~$PX)]
+     Price check: moved +1.7% since close (live ~$X.XX)   ← only when tier
+                                                            is info or warn
      Stop:       $…
      Target:     $…
      Time exit:  YYYY-MM-DD
@@ -729,8 +735,9 @@ New ideas (K):  ← LLM-approved + unavailable-fallback
  (or: "No new trades today.")
 
 Held for review (J) — LLM flagged these for human attention, not auto-ship:
-  1. SYMBOL — posture — expression
-     (same block as "New ideas", with pullback annotation if applicable)
+  1. SYMBOL[:etf] ($price) — posture — expression
+     Rec ID:     R-000xxx
+     (same block as "New ideas", with pullback + price-check annotations)
      Reasoning:  … (LLM's one-sentence review reason)
   …
 
@@ -746,17 +753,43 @@ Active recommendations & tracked positions (M):
 CLI: mef show <rec-id> · mef dismiss <rec-id> · mef status
 ```
 
-The pullback annotation (`⏳ wait for pullback (currently ~$X)`) fires
-when the candidate's `needs_pullback` flag is set (stock at/near its
-recent peak). The entry zone on the same line is a pullback-anchored
-resting-limit price below current — it fills on a dip or it doesn't.
+**Symbol header.** `SYMBOL[:etf] ($price)` — the price is the live
+Yahoo quote from `mef.price_check` when that ran successfully, else the
+SHDB close used at scoring time. The `:etf` tag appears only on ETF
+ideas so the reader sees at a glance that a symbol isn't a single-name
+trade. Omits the parenthetical entirely when no price is available.
 
-The earnings annotation (`📅 earnings in Nd`) appears on the symbol
+**Rec ID line.** Every idea prints its `R-0000xx` so the closing CLI
+hint (`mef show <rec-id>`) is directly actionable from the email.
+
+**Price check line.** The post-emission price-freshness check
+(`mef.price_check`, see `mef_price_check.md`) fetches a live Yahoo
+quote for each emitted idea and classifies the delta vs the SHDB close
+used at scoring time. Renders on its own line only when the tier is
+`info` (1–3% move) or `warn` (≥3% move, prefixed with ⚠). Silent
+when the move is inside 1% or when the fetch failed.
+
+**Pullback annotation** (`⏳ wait for pullback (currently ~$X)`)
+fires when the candidate's `needs_pullback` flag is set (stock at/near
+its recent peak). The entry zone on the same line is a pullback-
+anchored resting-limit price below current — it fills on a dip or it
+doesn't.
+
+**Earnings annotation** (`📅 earnings in Nd`) appears on the symbol
 line when the candidate's `next_earnings_date` is within 21 days.
-Ideas with earnings ≤5 days (or ≤10 days on pullback setups) never
-reach the email — the ranker vetos them to `no_edge` upstream. By
-the time an idea hits the email, the annotation is context, not a
-warning.
+Earnings within the Layer-A blackout window never reach the email —
+Layer A blocks the symbol per engine (trend 5d, mean_rev 10d, value
+10d; see `mef_layered_gating.md`). By the time an idea hits the email
+the annotation is context, not a warning. The 6–21d window on trend
+setups also gets a Layer B earnings-proximity hazard penalty applied
+upstream.
+
+**Gate-unavailable banner** is appended to the header block when the
+LLM gate failed wholesale — with a suffix naming the failure class:
+"⚠ LLM gate was unavailable for this run **due to LLM timeouts** —
+ideas below were not reviewed." The per-idea block carries a
+"⚠ Not reviewed by LLM (gate unavailable)." footer when the gate
+returned that specific candidate as `unavailable`.
 
 The macro banner (`📅 Upcoming high-impact US macro events`) is
 rendered only when the bundle carries events within a 3-day horizon.

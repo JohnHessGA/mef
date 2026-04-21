@@ -43,6 +43,15 @@ path (no ideas to check).
 | `warn`        | \|delta\| ≥ `warn_threshold_pct` (3% default) | "Price check: ⚠ moved +X.Y% since close (live ~\$NNN.NN) — entry zone may need refresh" |
 | `unavailable` | Fetch error or no data for this symbol     | Silent (no line) |
 
+## Price in the idea header
+
+The idea header (e.g. `1. JCI ($139.67) — bullish — buy_shares [engine: trend]`)
+also prefers the live Yahoo print when the price-check ran successfully
+for that symbol (`price_check_current`), falling back to the SHDB close
+(`current_price`) otherwise. Separate from the "Price check: …" line —
+the header is always there, the annotation line only renders on info /
+warn tiers.
+
 ## Session tagging
 
 The bar timestamp is used to tag `source_session`:
