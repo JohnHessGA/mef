@@ -258,6 +258,27 @@ def _score_symbol(symbol: str, row: dict[str, Any], baseline: dict[str, Any]) ->
         base -= 0.15
         notes.append(f"deep drawdown {drawdown:.1%} → penalty")
 
+    # Fundamental sanity — stocks only (ETFs have NULL fundamentals,
+    # and the rule wouldn't make sense applied to them anyway). Hard
+    # veto on negative TTM free cash flow: no amount of technical
+    # momentum saves a cash-burner. Softer penalties on extreme PE
+    # / very low earnings yield for expensive names.
+    if row.get("asset_kind") == "stock":
+        fcf = row.get("free_cash_flow")
+        pe = row.get("pe_trailing")
+        ey = row.get("earnings_yield")
+        if fcf is not None and fcf < 0:
+            posture = POSTURE_NO_EDGE
+            base = 0.0
+            notes.append("negative TTM free cash flow → veto")
+        else:
+            if pe is not None and pe > 60:
+                base -= 0.05
+                notes.append(f"extreme PE ({pe:.0f}) → penalty")
+            if ey is not None and 0 < ey < 0.02:
+                base -= 0.02
+                notes.append(f"earnings yield {ey:.1%} → expensive")
+
     conviction = _clamp(base, 0.0, 1.0)
 
     # Anything that barely scored is just no_edge.

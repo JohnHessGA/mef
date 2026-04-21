@@ -160,7 +160,8 @@ SELECT sed.symbol, sed.bar_date, sed.sector, sed.close,
        sed.rs_vs_spy_20d, sed.rs_vs_spy_63d, sed.rs_vs_qqq_63d,
        sed.drawdown_current,
        sed.volume_z_score,
-       sed.atr_14
+       sed.atr_14,
+       sed.pe_trailing, sed.free_cash_flow, sed.earnings_yield
   FROM mart.stock_equity_daily sed
   JOIN latest l
     ON l.symbol = sed.symbol

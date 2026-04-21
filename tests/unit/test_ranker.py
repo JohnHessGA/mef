@@ -41,6 +41,10 @@ def _row(**kwargs):
         "realized_vol_20d": 0.15, "realized_vol_63d": 0.16,
         "drawdown_current": -0.02,
         "volume_z_score": 0.2, "sector": "Technology",
+        # Fundamentals defaults — healthy large-cap profile so baseline
+        # tests don't accidentally trigger the veto or penalties.
+        "free_cash_flow": 5_000_000_000.0, "pe_trailing": 25.0,
+        "earnings_yield": 0.04,
         "trend_above_sma50": True, "trend_above_sma200": True,
     }
     base.update(kwargs)
@@ -118,6 +122,32 @@ def test_select_for_emission_applies_threshold_and_cap():
 
     survivors_capped = select_for_emission(cands, conviction_threshold=0.5, max_new_ideas=1)
     assert len(survivors_capped) == 1
+
+
+def test_negative_fcf_vetos_regardless_of_momentum():
+    # Even a perfectly trending stock is vetoed if TTM FCF is negative.
+    cand = rank(_bundle({"BURN": _row(symbol="BURN", free_cash_flow=-1e9)}))[0]
+    assert cand.posture == POSTURE_NO_EDGE
+    assert any("free cash flow" in n for n in cand.reasoning_notes)
+
+
+def test_extreme_pe_applies_soft_penalty():
+    cheap = rank(_bundle({"C": _row(symbol="C", pe_trailing=20)}))[0]
+    expensive = rank(_bundle({"E": _row(symbol="E", pe_trailing=80)}))[0]
+    assert cheap.conviction_score > expensive.conviction_score
+    assert any("extreme PE" in n for n in expensive.reasoning_notes)
+
+
+def test_etf_fundamentals_are_ignored():
+    # ETFs don't carry TTM FCF / PE in the same way — a NULL fundamental
+    # row must NOT veto or penalize an ETF candidate.
+    cand = rank(_bundle({"SPY": _row(
+        symbol="SPY", asset_kind="etf", sector=None,
+        free_cash_flow=None, pe_trailing=None, earnings_yield=None,
+    )}))[0]
+    assert cand.posture != POSTURE_NO_EDGE
+    assert not any("free cash flow" in n for n in cand.reasoning_notes)
+    assert not any("PE" in n for n in cand.reasoning_notes)
 
 
 def test_vol_contraction_bonus_vs_expansion_penalty():
