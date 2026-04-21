@@ -10,6 +10,7 @@ import pytest
 
 from mef.llm.client import extract_json_block
 from mef.llm.gate import _parse_gate_response
+from mef.llm.prompts import build_gate_prompt, render_candidates_block
 
 
 def test_extract_json_block_plain():
@@ -96,3 +97,42 @@ def test_parse_gate_response_reviews_not_list_raises():
 def test_parse_gate_response_empty_text_raises():
     with pytest.raises(ValueError):
         _parse_gate_response("")
+
+
+def _candidate(**kwargs):
+    base = {
+        "candidate_id": "C-1", "symbol": "AEP", "asset_kind": "stock",
+        "posture": "bullish", "conviction_score": 0.76,
+        "features": {
+            "close": 133.66, "return_20d": 0.038, "rsi_14": 63,
+            "macd_histogram": 0.01, "drawdown_current": -0.025,
+            "volume_z_score": -0.1, "sector": "Utilities",
+        },
+        "proposed_expression": "buy_shares",
+        "proposed_entry_zone": "$129.68-$132.30",
+        "proposed_stop": 121.90, "proposed_target": 141.68,
+        "proposed_time_exit": "2026-05-17",
+        "needs_pullback": False,
+    }
+    base.update(kwargs)
+    return base
+
+
+def test_candidates_block_surfaces_pullback_flag():
+    pullback_line = render_candidates_block([_candidate(needs_pullback=True)])
+    regular_line = render_candidates_block([_candidate(needs_pullback=False)])
+    assert "pullback_setup=true" in pullback_line
+    assert "pullback_setup=false" in regular_line
+
+
+def test_gate_prompt_includes_pullback_special_rule():
+    prompt = build_gate_prompt(
+        candidates=[_candidate(needs_pullback=True)],
+        as_of_date="2026-04-20",
+        spy_return_20d=0.076, spy_return_63d=0.026,
+    )
+    # The rule's existence matters more than exact wording.
+    assert "SPECIAL RULE FOR PULLBACK SETUPS" in prompt
+    assert "pullback_setup=true" in prompt
+    # Explicitly tells the LLM NOT to flag current-vs-entry gap on pullback setups.
+    assert "current price exceeds entry range" in prompt.lower()

@@ -83,6 +83,7 @@ def _candidate_payload(c: RankedCandidate, *, candidate_uid: str | None = None) 
         "proposed_stop":        c.proposed_stop,
         "proposed_target":      c.proposed_target,
         "proposed_time_exit":   c.proposed_time_exit.isoformat() if c.proposed_time_exit else None,
+        "needs_pullback":       c.needs_pullback,
     }
 
 

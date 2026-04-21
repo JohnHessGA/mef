@@ -93,6 +93,27 @@ If the candidate might be valid but essential context is missing, use "review".
 Do not approve borderline cases.
 
 ----------------------------------------------------------------
+SPECIAL RULE FOR PULLBACK SETUPS
+----------------------------------------------------------------
+
+When a candidate has pullback_setup=true, the ranker has INTENTIONALLY anchored
+the entry zone below the current price because the stock closed at or very near
+its recent peak. The entry zone is a resting-limit price that fills only on a
+pullback — the gap between current close and entry_high is by design.
+
+On a pullback_setup=true candidate:
+
+- Do NOT flag "current price exceeds entry range" as an issue. That gap is the
+  feature, not a bug.
+- When judging risk/reward, compute it from the midpoint of the entry zone,
+  NOT from current close. The stop/target are sized against the pullback entry,
+  not against today's print.
+- Everything else (trade-shape sanity, durable-knowledge risk, mechanical
+  coherence) still applies normally.
+
+If a pullback setup is otherwise coherent, approve it.
+
+----------------------------------------------------------------
 SPECIAL RULE FOR OPTION CANDIDATES
 ----------------------------------------------------------------
 
@@ -196,6 +217,7 @@ def render_candidates_block(candidates: list[dict[str, Any]]) -> str:
             f"- candidate_id={c.get('candidate_id', '?')} "
             f"symbol={c['symbol']} ({c['asset_kind']}) "
             f"posture={c['posture']} conviction={c['conviction_score']:.2f} "
+            f"pullback_setup={str(bool(c.get('needs_pullback'))).lower()} "
             f"close={_fmt(fx.get('close'), '{:.2f}')} "
             f"ret20d={_fmt_pct(fx.get('return_20d'))} "
             f"rsi14={_fmt(fx.get('rsi_14'), '{:.0f}')} "
