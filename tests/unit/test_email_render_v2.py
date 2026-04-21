@@ -122,6 +122,72 @@ def test_unavailable_banner_includes_parse_reason():
     assert "unparseable LLM response" in email.body
 
 
+def test_header_renders_live_price_when_price_check_ran():
+    # When mef.price_check provided a live quote, the header should
+    # show that number (the freshest we have).
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-PX", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(
+            symbol="JCI", current_price=139.46,
+            price_check_current=139.67,
+        )],
+    )
+    assert "JCI ($139.67)" in email.body
+
+
+def test_header_falls_back_to_scored_close_without_price_check():
+    # No price_check_current → use the SHDB close the ranker scored
+    # against (current_price).
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-PX2", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(symbol="JCI", current_price=139.46)],
+    )
+    assert "JCI ($139.46)" in email.body
+
+
+def test_header_tags_etf_kind():
+    # ETF ideas should carry a ":etf" tag right after the symbol so
+    # the reader sees at a glance this isn't a single-name trade.
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-ETF", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(
+            symbol="SPY", asset_kind="etf", expression="buy_etf",
+            current_price=450.12,
+        )],
+    )
+    assert "SPY:etf ($450.12)" in email.body
+
+
+def test_header_no_etf_tag_on_stock():
+    # Regression guard: stocks must not get an ETF tag appended.
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-STK", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(symbol="JCI", current_price=139.46)],
+    )
+    assert "JCI:etf" not in email.body
+
+
+def test_header_omits_price_when_none_available():
+    # Safety net: a row with no price at all (neither price_check nor
+    # current_price) must not render "($None)" or crash.
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-NP", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(symbol="XYZ")],
+    )
+    assert "XYZ — bullish" in email.body
+    assert "($None)" not in email.body
+
+
 def test_unavailable_banner_omits_reason_when_kind_unknown():
     # Back-compat: if the kind isn't supplied, the banner falls back to
     # the previous unadorned wording. Guards against a regression where

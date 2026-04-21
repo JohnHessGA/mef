@@ -76,12 +76,34 @@ def _engine_badge(source_engines: list[str] | None) -> str:
     return f"  [engines: {'+'.join(labels)}]"
 
 
-def _idea_lines(idx: int, idea: dict[str, Any]) -> list[str]:
+def _symbol_label(idea: dict[str, Any]) -> str:
+    """Build the "SYMBOL [:etf] ($price)" fragment for an idea header.
+
+    The price shown is the freshest price we have: the live Yahoo print
+    from ``mef.price_check`` when it ran successfully, otherwise the
+    SHDB close used at scoring time (``current_price``). We never lie
+    about freshness — the per-idea "Price check:" line already tells
+    the user when that live number differs meaningfully from the close.
+    """
     symbol = idea.get("symbol", "?")
+    asset_kind = idea.get("asset_kind")
+    kind_tag = ":etf" if asset_kind == "etf" else ""
+
+    # Prefer the live Yahoo print if the price-check ran this idea.
+    # Fall back to the scored close (``current_price``) otherwise.
+    price = idea.get("price_check_current")
+    if price is None:
+        price = idea.get("current_price")
+    price_str = f" (${price:,.2f})" if price is not None else ""
+
+    return f"{symbol}{kind_tag}{price_str}"
+
+
+def _idea_lines(idx: int, idea: dict[str, Any]) -> list[str]:
     posture = idea.get("posture", "?")
     expression = idea.get("expression", "?")
     badge = _engine_badge(idea.get("source_engines"))
-    header = f"  {idx}. {symbol} — {posture} — {expression}{badge}"
+    header = f"  {idx}. {_symbol_label(idea)} — {posture} — {expression}{badge}"
     # Earnings annotation on the symbol line when an announcement is
     # within the caution horizon (≤21 days). Informational only — the
     # ranker already vetoed or penalized per its own thresholds, so by
