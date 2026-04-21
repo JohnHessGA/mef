@@ -127,10 +127,13 @@ def _mark_failed(conn, *, run_uid: str, error_text: str) -> None:
 # ─────────────────────────────────────────────────────────────────────────
 
 def _json_safe(features: dict[str, Any]) -> dict[str, Any]:
+    from decimal import Decimal
     out: dict[str, Any] = {}
     for k, v in features.items():
         if hasattr(v, "isoformat"):
             out[k] = v.isoformat()
+        elif isinstance(v, Decimal):
+            out[k] = float(v)
         else:
             out[k] = v
     return out
