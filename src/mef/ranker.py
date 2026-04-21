@@ -418,6 +418,246 @@ def _draft_plan(cand: RankedCandidate) -> RankedCandidate:
     )
 
 
+POSTURE_OVERSOLD_BOUNCING = "oversold_bouncing"
+
+
+def _score_mean_rev(symbol: str, row: dict[str, Any], baseline: dict[str, Any]) -> RankedCandidate:
+    """Mean-reversion engine scorer.
+
+    Rewards oversold bounce setups — stocks that have pulled back 5–15%
+    below their SMA50, RSI in oversold territory, macd turning up, and
+    return_5d non-negative (i.e., stabilizing, not still falling). The
+    thesis is: snap-back to SMA20 / SMA50. Explicitly rejects falling
+    knives (return_5d < 0, deep drawdown below -30%).
+
+    Produces posture `oversold_bouncing` when a setup is present,
+    `no_edge` otherwise. Draft plan places entry near current close
+    (the name is already pulled back — no further patience required),
+    stop below recent low, target at SMA20/50 reclaim.
+    """
+    close = row.get("close")
+    sma_50 = row.get("sma_50")
+    sma_200 = row.get("sma_200")
+    rsi = row.get("rsi_14")
+    macd_hist = row.get("macd_histogram")
+    macd_value = row.get("macd_value")
+    macd_signal = row.get("macd_signal")
+    return_5d = row.get("return_5d")
+    return_20d = row.get("return_20d")
+    drawdown = row.get("drawdown_current")
+    vol_z = row.get("volume_z_score")
+    rv20 = row.get("realized_vol_20d")
+    rv63 = row.get("realized_vol_63d")
+    bar_date = row.get("bar_date") or date.today()
+
+    # Minimum viable evidence — without close or SMA50 we have no opinion.
+    if close is None or sma_50 is None or rsi is None:
+        return RankedCandidate(
+            symbol=symbol,
+            asset_kind=row.get("asset_kind", "stock"),
+            posture=POSTURE_NO_EDGE,
+            conviction_score=0.0,
+            features=row,
+            engine=ENGINE_MEAN_REVERSION,
+            reasoning_notes=["insufficient evidence for mean_reversion"],
+        )
+
+    # Gate 1: is this an oversold setup at all? Require meaningfully
+    # below SMA50 and RSI < 40. If not, no mean-rev case.
+    below_sma50_pct = (close / sma_50) - 1.0
+    if rsi >= 40 or below_sma50_pct > -0.03:
+        return RankedCandidate(
+            symbol=symbol,
+            asset_kind=row.get("asset_kind", "stock"),
+            posture=POSTURE_NO_EDGE,
+            conviction_score=0.0,
+            features=row,
+            engine=ENGINE_MEAN_REVERSION,
+            reasoning_notes=["not oversold for mean_reversion"],
+        )
+
+    # Gate 2: falling-knife veto. If return_5d is strongly negative OR
+    # drawdown is deep (>30%), the stock is still in free-fall.
+    if (return_5d is not None and return_5d < -0.02) \
+       or (drawdown is not None and drawdown < -0.30):
+        return RankedCandidate(
+            symbol=symbol,
+            asset_kind=row.get("asset_kind", "stock"),
+            posture=POSTURE_NO_EDGE,
+            conviction_score=0.0,
+            features=row,
+            engine=ENGINE_MEAN_REVERSION,
+            reasoning_notes=[
+                f"falling knife — ret5d {(return_5d or 0):+.1%} dd {(drawdown or 0):+.1%}"
+            ],
+        )
+
+    notes: list[str] = []
+    posture = POSTURE_OVERSOLD_BOUNCING
+    base = 0.50
+
+    # RSI depth — deeper oversold = stronger snapback case.
+    if rsi < 30:
+        base += 0.08
+        notes.append(f"RSI deeply oversold ({rsi:.0f})")
+    elif rsi < 35:
+        base += 0.05
+        notes.append(f"RSI oversold ({rsi:.0f})")
+    else:  # 35-40
+        base += 0.02
+        notes.append(f"RSI mildly oversold ({rsi:.0f})")
+
+    # Distance below SMA50. Sweet spot is -5% to -15%: deep enough to
+    # bounce meaningfully, not deep enough to signal trend change.
+    if -0.15 <= below_sma50_pct <= -0.05:
+        base += 0.08
+        notes.append(f"{below_sma50_pct:+.1%} below SMA50 (snapback zone)")
+    elif below_sma50_pct < -0.15:
+        base -= 0.05
+        notes.append(f"{below_sma50_pct:+.1%} below SMA50 (deep)")
+
+    # Short-term direction — actively bouncing is the signal.
+    if return_5d is not None:
+        if return_5d >= 0.01:
+            base += 0.08
+            notes.append(f"bouncing (ret5d {return_5d:+.1%})")
+        elif return_5d >= 0:
+            base += 0.04
+            notes.append(f"stabilizing (ret5d {return_5d:+.1%})")
+
+    # MACD crossover-up — bullish cross is the classic mean-rev trigger.
+    if macd_value is not None and macd_signal is not None and macd_value > macd_signal:
+        base += 0.05
+        notes.append("MACD bullish cross")
+    elif macd_hist is not None and macd_hist > 0:
+        base += 0.03
+        notes.append("MACD histogram positive")
+
+    # Trend backdrop — above SMA200 means this is a pullback in an
+    # uptrend, not a full breakdown.
+    if sma_200 is not None:
+        if close > sma_200:
+            base += 0.04
+            notes.append("above SMA200 (pullback in uptrend)")
+        else:
+            base -= 0.05
+            notes.append("below SMA200 (not just a pullback)")
+
+    # Accumulation signal — volume spike on the decline.
+    if vol_z is not None and vol_z > 1.0:
+        base += 0.04
+        notes.append(f"accumulation volume (z {vol_z:+.2f})")
+
+    # Vol contracting into the low — stabilization marker.
+    if rv20 is not None and rv63 is not None and rv63 > 0:
+        vol_ratio = rv20 / rv63
+        if vol_ratio < 0.85:
+            base += 0.03
+            notes.append(f"vol contracting into low ({vol_ratio:.2f})")
+
+    # Earnings gate — identical to trend. Event risk is worse for
+    # mean-rev plays because bounce thesis can be reset overnight.
+    if row.get("asset_kind") == "stock":
+        next_earn = row.get("next_earnings_date")
+        if next_earn is not None:
+            days_to_earn = (next_earn - bar_date).days
+            if 0 <= days_to_earn <= 10:
+                posture = POSTURE_NO_EDGE
+                base = 0.0
+                notes.append(f"earnings in {days_to_earn}d → veto")
+
+    # Fundamental veto — still applies.
+    if row.get("asset_kind") == "stock":
+        fcf = row.get("free_cash_flow")
+        if fcf is not None and fcf < 0:
+            posture = POSTURE_NO_EDGE
+            base = 0.0
+            notes.append("negative TTM free cash flow → veto")
+
+    # Macro-event dampener — same as trend.
+    if posture == POSTURE_OVERSOLD_BOUNCING:
+        events = baseline.get("upcoming_high_impact_events") or []
+        for ev in events:
+            days_to_ev = (ev["date"] - bar_date).days
+            if 0 <= days_to_ev <= 1:
+                base -= 0.05
+                notes.append(
+                    f"high-impact macro event {ev['event']} in {days_to_ev}d"
+                )
+                break
+
+    conviction = _clamp(base, 0.0, 1.0)
+    if conviction < 0.40:
+        posture = POSTURE_NO_EDGE
+
+    return RankedCandidate(
+        symbol=symbol,
+        asset_kind=row.get("asset_kind", "stock"),
+        posture=posture,
+        conviction_score=round(conviction, 4),
+        features=row,
+        engine=ENGINE_MEAN_REVERSION,
+        reasoning_notes=notes,
+    )
+
+
+def _draft_plan_mean_rev(cand: RankedCandidate) -> RankedCandidate:
+    """Entry/stop/target for mean-reversion candidates.
+
+    The stock is already pulled back, so entry is near current price
+    (no patience needed). Stop sits below the recent low to invalidate
+    the bounce thesis; target aims for SMA20/SMA50 reclaim.
+    """
+    close = cand.features.get("close")
+    if close is None or cand.posture != POSTURE_OVERSOLD_BOUNCING:
+        return cand
+
+    expression = EXPRESSION_BUY_ETF if cand.asset_kind == "etf" else EXPRESSION_BUY_SHARES
+    sma_50 = cand.features.get("sma_50") or (close * 1.08)
+    # Target the SMA50 reclaim (typical snap-back destination), capped
+    # at +8% so we don't propose absurd targets on very deep oversolds.
+    target = round(min(sma_50, close * 1.08), 2)
+    # Buy on market — name is already pulled back.
+    entry_low = round(close * 0.99, 2)
+    entry_high = round(close * 1.01, 2)
+    # Stop 7% below close (below where the oversold bottom likely sits).
+    stop = round(close * 0.93, 2)
+
+    bar_date = cand.features.get("bar_date") or date.today()
+    time_exit = bar_date + timedelta(days=30)
+
+    return RankedCandidate(
+        symbol=cand.symbol,
+        asset_kind=cand.asset_kind,
+        posture=cand.posture,
+        conviction_score=cand.conviction_score,
+        features=cand.features,
+        engine=cand.engine,
+        proposed_expression=expression,
+        proposed_entry_zone=f"${entry_low:.2f}-${entry_high:.2f}",
+        proposed_stop=stop,
+        proposed_target=target,
+        proposed_time_exit=time_exit,
+        needs_pullback=False,
+        reasoning_notes=cand.reasoning_notes,
+    )
+
+
+def _rank_mean_reversion(evidence: EvidenceBundle) -> list[RankedCandidate]:
+    """Mean-reversion engine — oversold bounce setups.
+
+    Opposite philosophy from trend: buys drops, not rips. Typical picks
+    overlap with trend's rejections and vice versa.
+    """
+    out: list[RankedCandidate] = []
+    for symbol, row in evidence.symbols.items():
+        cand = _score_mean_rev(symbol, row, evidence.baseline)
+        if cand.posture == POSTURE_OVERSOLD_BOUNCING:
+            cand = _draft_plan_mean_rev(cand)
+        out.append(cand)
+    return out
+
+
 def _rank_trend(evidence: EvidenceBundle) -> list[RankedCandidate]:
     """Trend-follower engine — the original MEF scorer.
 
@@ -440,7 +680,8 @@ def _rank_trend(evidence: EvidenceBundle) -> list[RankedCandidate]:
 # engines (mean_reversion, value) land in follow-up commits and register
 # themselves here.
 ENGINE_REGISTRY: dict[str, Any] = {
-    ENGINE_TREND: _rank_trend,
+    ENGINE_TREND:          _rank_trend,
+    ENGINE_MEAN_REVERSION: _rank_mean_reversion,
 }
 
 

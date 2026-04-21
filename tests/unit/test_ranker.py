@@ -63,7 +63,8 @@ def _bundle(rows: dict[str, dict], spy_ret20: float = 0.01, sector_returns_63d=N
 
 
 def test_bullish_uptrend_with_healthy_rsi_emits():
-    cands = rank(_bundle({"AAPL": _row(symbol="AAPL")}))
+    cands = rank(_bundle({"AAPL": _row(symbol="AAPL")}),
+                 enabled_engines=["trend"])
     assert len(cands) == 1
     c = cands[0]
     assert c.posture == POSTURE_BULLISH
@@ -261,10 +262,84 @@ def test_mtf_falling_this_week_applies_standalone_brake():
     assert any("falling this week" in n for n in falling.reasoning_notes)
 
 
+def _oversold_row(**kwargs):
+    """Row shaped for mean-reversion: below SMA50, oversold RSI, bouncing."""
+    base = {
+        "symbol": "MR", "asset_kind": "stock", "bar_date": date(2026, 4, 17),
+        "close": 88.0, "sma_20": 92.0, "sma_50": 95.0, "sma_200": 85.0,
+        "sma_20_slope": -0.1, "sma_50_slope": 0.0,
+        "return_5d": 0.01, "return_20d": -0.08, "return_63d": 0.04,
+        "return_126d": 0.05, "return_252d": 0.10,
+        "rsi_14": 32.0,
+        "macd_histogram": -0.3, "macd_value": 0.1, "macd_signal": -0.1,
+        "realized_vol_20d": 0.18, "realized_vol_63d": 0.20,
+        "drawdown_current": -0.10, "volume_z_score": 0.6,
+        "sector": "Technology",
+        "trend_above_sma50": False, "trend_above_sma200": True,
+        "free_cash_flow": 5_000_000_000.0, "pe_trailing": 20.0,
+        "earnings_yield": 0.05, "rs_vs_spy_20d": -0.02,
+        "rs_vs_spy_63d": 0.0, "rs_vs_qqq_63d": 0.0,
+        "atr_14": 1.5, "next_earnings_date": None,
+    }
+    base.update(kwargs)
+    return base
+
+
+def test_mean_rev_engine_scores_oversold_bouncing_setup():
+    cands = rank(_bundle({"MR": _oversold_row()}),
+                 enabled_engines=["mean_reversion"])
+    oversold = [c for c in cands if c.engine == "mean_reversion"
+                and c.posture == "oversold_bouncing"]
+    assert len(oversold) == 1
+    c = oversold[0]
+    assert c.conviction_score >= 0.6
+    assert c.proposed_stop is not None and c.proposed_stop < c.features["close"]
+    assert c.proposed_target is not None and c.proposed_target > c.features["close"]
+
+
+def test_mean_rev_rejects_falling_knife():
+    # return_5d strongly negative → falling-knife veto regardless of RSI.
+    cands = rank(_bundle({"FK": _oversold_row(return_5d=-0.05)}),
+                 enabled_engines=["mean_reversion"])
+    assert cands[0].posture == "no_edge"
+    assert any("falling knife" in n for n in cands[0].reasoning_notes)
+
+
+def test_mean_rev_rejects_non_oversold_stocks():
+    # Healthy RSI → not an oversold setup → no_edge from mean_reversion.
+    cands = rank(_bundle({"NX": _oversold_row(rsi_14=55.0, close=100.0)}),
+                 enabled_engines=["mean_reversion"])
+    assert cands[0].posture == "no_edge"
+
+
+def test_mean_rev_below_sma200_penalized():
+    """Below SMA200 = not just a pullback; lower conviction vs. above."""
+    above = rank(_bundle({"A": _oversold_row(sma_200=80.0)}),   # close > sma_200
+                 enabled_engines=["mean_reversion"])[0]
+    below = rank(_bundle({"B": _oversold_row(sma_200=95.0)}),   # close < sma_200
+                 enabled_engines=["mean_reversion"])[0]
+    assert above.conviction_score > below.conviction_score
+
+
+def test_mean_rev_and_trend_produce_disjoint_candidates():
+    """Same row hits one engine or the other, never both.
+    A pullback-into-uptrend row is mean-rev territory; trend will score it low.
+    """
+    row = _oversold_row(symbol="X")
+    both = rank(_bundle({"X": row}), enabled_engines=["trend", "mean_reversion"])
+    trend = [c for c in both if c.engine == "trend"]
+    mr = [c for c in both if c.engine == "mean_reversion"]
+    # Both engines return SOMETHING for every symbol (including no_edge)
+    assert len(trend) == 1 and len(mr) == 1
+    # But only mean_rev should produce an emittable posture here.
+    assert mr[0].posture == "oversold_bouncing"
+    assert trend[0].posture != "bullish"   # trend won't call this bullish
+
+
 def test_rank_tags_candidates_with_engine_name():
     # Every candidate produced by rank() must carry the engine name so
     # downstream persistence (mef.candidate.engine) tags rows correctly.
-    cands = rank(_bundle({"T": _row()}))
+    cands = rank(_bundle({"T": _row()}), enabled_engines=["trend"])
     assert len(cands) == 1
     assert cands[0].engine == "trend"
 
