@@ -135,17 +135,24 @@ get forgotten):
 
 ### Ensemble of independent ranker engines
 
-**Why deferred:**
+**Status change 2026-04-22:** Moved from "deferred" to "active planning"
+at user direction. Per the MEF operating principle that conviction
+thresholds rise with confidence — not fall to fill quiet days — adding
+a second engine is a legitimate answer to "how do we produce ideas the
+current trend-follower structurally can't surface" without lowering
+the threshold on the existing engine.
+
+**Original rationale for deferral** (retained so reviewers know what
+we're trading off):
 - Non-trivial structural work (second scoring module, fusion logic,
   separate thresholds, expanded LLM prompt, per-engine telemetry).
-- Premature without outcome data on the current ranker. We don't yet
-  know the current engine's hit rate, so we can't measure whether a
-  second engine adds signal or noise.
+- Without outcome data on the current ranker, we can't measure whether
+  a second engine adds signal or noise.
 
-**When to revisit:** after ~30 closed scores land (~mid-to-late May
-2026 based on the current paper-score deferral pipeline), when we can
-assess whether the single-philosophy ranker has systematic blind spots
-a second philosophy could fill.
+**Mitigation:** we ship the second engine with per-engine telemetry
+and shadow-score it in parallel, so the same audit infrastructure that
+measures the current engine's hit rate also measures the ensemble's.
+See `mef_build_order.md` for the current status.
 
 ### Falling-knife detection via SMA20 direction
 
