@@ -1,6 +1,6 @@
 # MEF LLM Gate
 
-Version: 2026-04-21
+Version: 2026-04-22
 Status: Active design — update when the prompt or disposition vocabulary changes.
 
 The LLM is a **gate**, not an idea generator. The deterministic ranker
@@ -106,12 +106,20 @@ The candidate block is rendered by `render_candidates_block()` and
 includes the `candidate_id` (e.g. `C-002881`) so the LLM's response
 can be matched back even if it reorders or drops symbols. The block
 surfaces the full set of signals the ranker weighs: `pullback_setup`,
+`days_to_earnings` (integer, days from bar_date to
+`next_earnings_date`; `n/a` when no upcoming announcement is on file),
 close, `return_5d` / `return_20d` / `return_63d` / `return_252d`,
 RSI14, MACD histogram, SMA20 slope, `rv20/rv63` vol ratio,
 `rs_vs_spy_63d`, `rs_vs_qqq_63d`, drawdown, `vol_z`, sector, and the
 draft plan. Keeping the LLM's view aligned with the ranker's scoring
 inputs stops the LLM from commenting on a strictly smaller feature
 set than the one that actually produced the conviction score.
+
+Note that ideas with `days_to_earnings ≤ 5` (or ≤ 10 on pullback
+setups) never reach the gate — the ranker vetos them to `no_edge`
+before emission. The LLM only sees `days_to_earnings` values on ideas
+that cleared the hard veto, so a value of 12 or 18 is the expected
+range when this field carries a number.
 
 ---
 
