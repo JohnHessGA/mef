@@ -35,7 +35,8 @@ def _row(**kwargs):
         "return_5d": 0.005, "return_20d": 0.03, "return_63d": 0.05,
         "return_126d": 0.08, "return_252d": 0.12,
         "rsi_14": 55.0, "macd_histogram": 0.5,
-        "realized_vol_20d": 0.15, "drawdown_current": -0.02,
+        "realized_vol_20d": 0.15, "realized_vol_63d": 0.16,
+        "drawdown_current": -0.02,
         "volume_z_score": 0.2, "sector": "Technology",
         "trend_above_sma50": True, "trend_above_sma200": True,
     }
@@ -111,6 +112,15 @@ def test_select_for_emission_applies_threshold_and_cap():
 
     survivors_capped = select_for_emission(cands, conviction_threshold=0.5, max_new_ideas=1)
     assert len(survivors_capped) == 1
+
+
+def test_vol_contraction_bonus_vs_expansion_penalty():
+    coiled = rank(_bundle({"A": _row(realized_vol_20d=0.10, realized_vol_63d=0.18)}))[0]
+    neutral = rank(_bundle({"A": _row(realized_vol_20d=0.15, realized_vol_63d=0.16)}))[0]
+    expanding = rank(_bundle({"A": _row(realized_vol_20d=0.25, realized_vol_63d=0.15)}))[0]
+    assert coiled.conviction_score > neutral.conviction_score
+    assert expanding.conviction_score < neutral.conviction_score
+    assert any("coiled" in n for n in coiled.reasoning_notes)
 
 
 def test_mtf_no_disagreements_gives_bonus():

@@ -164,6 +164,23 @@ def _score_symbol(symbol: str, row: dict[str, Any], baseline: dict[str, Any]) ->
         base = 0.40
         notes.append("trend mixed (one SMA above, one below)")
 
+    # Volatility contraction — classic "coiled spring" signal. Applies
+    # to emittable postures: recent vol meaningfully below medium-term
+    # (ratio < 0.80) often precedes breakouts. Expansion (> 1.30) is
+    # often a sign of deteriorating tape — lighter penalty since it can
+    # also mark the start of a good move.
+    if posture in (POSTURE_BULLISH, POSTURE_RANGE_BOUND):
+        rv20 = row.get("realized_vol_20d")
+        rv63 = row.get("realized_vol_63d")
+        if rv20 is not None and rv63 is not None and rv63 > 0:
+            vol_ratio = rv20 / rv63
+            if vol_ratio < 0.80:
+                base += 0.04
+                notes.append(f"vol contracting (20d/63d {vol_ratio:.2f}) → coiled")
+            elif vol_ratio > 1.30:
+                base -= 0.03
+                notes.append(f"vol expanding (20d/63d {vol_ratio:.2f})")
+
     # Multi-timeframe consensus — applies to emittable postures only.
     # Framed as "count strong disagreements with bullish posture" rather
     # than "count alignments", so normal V-recovery negativity (SPY itself
