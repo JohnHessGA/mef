@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
-from mef.evidence import EvidenceBundle
+from mef.evidence import SECTOR_TO_ETF, EvidenceBundle
 
 
 POSTURE_BULLISH = "bullish"
@@ -141,16 +141,51 @@ def _score_symbol(symbol: str, row: dict[str, Any], baseline: dict[str, Any]) ->
             elif ext50 > 0.08:
                 base -= 0.08
                 notes.append(f"close {ext50:+.1%} above SMA50 → extended penalty")
-        # SPY-relative nudge
-        spy20 = baseline.get("spy_return_20d")
-        if posture == POSTURE_BULLISH and spy20 is not None and return_20d is not None:
-            rel = return_20d - spy20
-            if rel > 0:
+        # SPY-relative nudge (prefer the mart's pre-computed rs_vs_spy
+        # over hand-math so the signal stays in sync with other tooling
+        # that reads those columns).
+        rs_spy_20d = row.get("rs_vs_spy_20d")
+        if posture == POSTURE_BULLISH and rs_spy_20d is not None:
+            if rs_spy_20d > 0:
                 base += 0.03
-                notes.append(f"outperforming SPY by {rel:+.1%} over 20d")
-            elif rel < -0.03:
+                notes.append(f"outperforming SPY by {rs_spy_20d:+.1%} over 20d")
+            elif rs_spy_20d < -0.03:
                 base -= 0.04
-                notes.append(f"trailing SPY by {rel:+.1%} over 20d")
+                notes.append(f"trailing SPY by {rs_spy_20d:+.1%} over 20d")
+        # Persistent SPY leadership (longer lookback) — smaller bonus,
+        # more durable signal than the 20d version.
+        rs_spy_63d = row.get("rs_vs_spy_63d")
+        if posture == POSTURE_BULLISH and rs_spy_63d is not None and rs_spy_63d > 0.03:
+            base += 0.02
+            notes.append(f"sustained SPY outperformance ({rs_spy_63d:+.1%}/63d)")
+        # QQQ-relative: beating the tech/growth index over 63d is a
+        # meaningful signal for non-tech names; lagging it badly matters
+        # for tech names. Small weight.
+        rs_qqq_63d = row.get("rs_vs_qqq_63d")
+        if posture == POSTURE_BULLISH and rs_qqq_63d is not None:
+            if rs_qqq_63d > 0.03:
+                base += 0.02
+                notes.append(f"beating QQQ by {rs_qqq_63d:+.1%}/63d")
+            elif rs_qqq_63d < -0.08:
+                base -= 0.02
+                notes.append(f"lagging QQQ by {rs_qqq_63d:+.1%}/63d")
+        # Sector-relative strength: compare this stock's 63d return to
+        # its own sector ETF's 63d return. Rotation leaders surface here
+        # when the broad index is flat.
+        sector = row.get("sector")
+        sector_etf = SECTOR_TO_ETF.get(sector) if sector else None
+        sector_returns_63d = baseline.get("sector_returns_63d") or {}
+        sector_ret_63d = sector_returns_63d.get(sector_etf)
+        return_63d = row.get("return_63d")
+        if (posture == POSTURE_BULLISH and sector_ret_63d is not None
+                and return_63d is not None):
+            sector_rel = return_63d - sector_ret_63d
+            if sector_rel > 0.02:
+                base += 0.04
+                notes.append(f"beating {sector} sector by {sector_rel:+.1%}/63d")
+            elif sector_rel < -0.05:
+                base -= 0.03
+                notes.append(f"trailing {sector} sector by {sector_rel:+.1%}/63d")
     elif not above_50 and not above_200:
         posture = POSTURE_BEARISH_CAUTION
         base = 0.45

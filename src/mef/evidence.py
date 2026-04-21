@@ -25,6 +25,23 @@ from typing import Any
 from mef.db.connection import connect_mefdb, connect_shdb
 
 
+# Map UDC sector names → the matching XL* sector ETF in our universe.
+# Shared source of truth for the ranker's sector-relative signal and the
+# post-hoc scoring benchmark (mef.scoring re-exports this).
+SECTOR_TO_ETF = {
+    "Technology":             "XLK",
+    "Financial Services":     "XLF",
+    "Healthcare":             "XLV",
+    "Energy":                 "XLE",
+    "Industrials":            "XLI",
+    "Consumer Cyclical":      "XLY",
+    "Consumer Defensive":     "XLP",
+    # No mapped sector ETF in our 15-ETF universe for:
+    #   Communication Services, Utilities, Real Estate, Basic Materials.
+    # Stocks in those sectors fall through — no sector-relative score.
+}
+
+
 @dataclass(frozen=True)
 class EvidenceBundle:
     as_of_date: date
@@ -140,6 +157,7 @@ SELECT sed.symbol, sed.bar_date, sed.sector, sed.close,
        sed.sma_20_slope, sed.sma_50_slope,
        sed.rsi_14, sed.macd_histogram,
        sed.realized_vol_20d, sed.realized_vol_63d, sed.bb_width,
+       sed.rs_vs_spy_20d, sed.rs_vs_spy_63d, sed.rs_vs_qqq_63d,
        sed.drawdown_current,
        sed.volume_z_score,
        sed.atr_14
@@ -220,9 +238,18 @@ def pull_latest_evidence() -> EvidenceBundle:
 
     # SPY baseline: 20d / 63d return, taken directly from the ETF feature row.
     spy_row = etfs.get("SPY", {})
+    # Sector ETF 63d returns, for the ranker's sector-relative signal.
+    # Sector ETFs are part of the ETF universe so they're already loaded
+    # in `etfs`; no extra query needed.
+    sector_returns_63d = {
+        etf: etfs[etf].get("return_63d")
+        for etf in SECTOR_TO_ETF.values()
+        if etf in etfs and etfs[etf].get("return_63d") is not None
+    }
     baseline = {
-        "spy_return_20d": spy_row.get("return_20d"),
-        "spy_return_63d": spy_row.get("return_63d"),
+        "spy_return_20d":     spy_row.get("return_20d"),
+        "spy_return_63d":     spy_row.get("return_63d"),
+        "sector_returns_63d": sector_returns_63d,
     }
 
     return EvidenceBundle(as_of_date=as_of, baseline=baseline, symbols=symbols)

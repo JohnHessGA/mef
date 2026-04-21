@@ -35,6 +35,9 @@ def _row(**kwargs):
         "return_5d": 0.005, "return_20d": 0.03, "return_63d": 0.05,
         "return_126d": 0.08, "return_252d": 0.12,
         "rsi_14": 55.0, "macd_histogram": 0.5,
+        # Relative-strength defaults: modest outperformance vs SPY and
+        # QQQ so baseline tests don't inadvertently trip RS penalties.
+        "rs_vs_spy_20d": 0.02, "rs_vs_spy_63d": 0.03, "rs_vs_qqq_63d": 0.01,
         "realized_vol_20d": 0.15, "realized_vol_63d": 0.16,
         "drawdown_current": -0.02,
         "volume_z_score": 0.2, "sector": "Technology",
@@ -44,11 +47,14 @@ def _row(**kwargs):
     return base
 
 
-def _bundle(rows: dict[str, dict], spy_ret20: float = 0.01):
+def _bundle(rows: dict[str, dict], spy_ret20: float = 0.01, sector_returns_63d=None):
+    baseline = {
+        "spy_return_20d":     spy_ret20,
+        "spy_return_63d":     0.02,
+        "sector_returns_63d": sector_returns_63d or {},
+    }
     return EvidenceBundle(
-        as_of_date=date(2026, 4, 17),
-        baseline={"spy_return_20d": spy_ret20, "spy_return_63d": 0.02},
-        symbols=rows,
+        as_of_date=date(2026, 4, 17), baseline=baseline, symbols=rows,
     )
 
 
@@ -199,6 +205,36 @@ def test_needs_pullback_anchors_entry_below_close():
 
 
 def test_spy_relative_boost_vs_penalty():
-    better_than_spy = rank(_bundle({"S": _row(symbol="S", return_20d=0.08)}, spy_ret20=0.01))
-    worse_than_spy = rank(_bundle({"S": _row(symbol="S", return_20d=-0.05)}, spy_ret20=0.04))
+    better_than_spy = rank(_bundle({"S": _row(symbol="S", rs_vs_spy_20d=0.07)}))
+    worse_than_spy = rank(_bundle({"S": _row(symbol="S", rs_vs_spy_20d=-0.09)}))
     assert better_than_spy[0].conviction_score > worse_than_spy[0].conviction_score
+
+
+def test_sector_relative_strength_bonus_vs_penalty():
+    # Tech stock beating XLK by 5% over 63d → bonus.
+    leader = rank(_bundle(
+        {"TECHCO": _row(symbol="TECHCO", sector="Technology", return_63d=0.12)},
+        sector_returns_63d={"XLK": 0.05},
+    ))[0]
+    # Same stock lagging its sector by 8% → penalty.
+    laggard = rank(_bundle(
+        {"TECHCO": _row(symbol="TECHCO", sector="Technology", return_63d=-0.03)},
+        sector_returns_63d={"XLK": 0.05},
+    ))[0]
+    assert leader.conviction_score > laggard.conviction_score
+    assert any("beating Technology sector" in n for n in leader.reasoning_notes)
+
+
+def test_sector_unmapped_falls_through_cleanly():
+    # Utilities has no mapped sector ETF — ranker must not error; just no
+    # sector-relative score applied.
+    cand = rank(_bundle({"U": _row(symbol="U", sector="Utilities")}))[0]
+    # Should score normally without sector notes.
+    assert cand.posture in ("bullish", "range_bound", "no_edge")
+    assert not any("sector" in n for n in cand.reasoning_notes)
+
+
+def test_qqq_relative_bonus_and_penalty():
+    beating_qqq = rank(_bundle({"X": _row(symbol="X", rs_vs_qqq_63d=0.08)}))[0]
+    lagging_qqq = rank(_bundle({"X": _row(symbol="X", rs_vs_qqq_63d=-0.12)}))[0]
+    assert beating_qqq.conviction_score > lagging_qqq.conviction_score

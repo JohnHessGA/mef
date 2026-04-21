@@ -38,19 +38,10 @@ from mef.db.connection import connect_mefdb, connect_shdb
 from mef.uid import next_uid
 
 
-# Map UDC sector names → the matching XL* sector ETF in our universe.
-_SECTOR_TO_ETF = {
-    "Technology":             "XLK",
-    "Financial Services":     "XLF",
-    "Healthcare":             "XLV",
-    "Energy":                 "XLE",
-    "Industrials":            "XLI",
-    "Consumer Cyclical":      "XLY",
-    "Consumer Defensive":     "XLP",
-    # No mapped sector ETF in our 15-ETF universe for:
-    #   Communication Services, Utilities, Real Estate, Basic Materials.
-    # Score rows for those sectors leave sector_etf_symbol NULL.
-}
+# Sector→ETF mapping lives in evidence.py so both the ranker's
+# sector-relative signal and the post-hoc scoring benchmark share one
+# source of truth.
+from mef.evidence import SECTOR_TO_ETF as _SECTOR_TO_ETF  # noqa: E402
 
 
 @dataclass
