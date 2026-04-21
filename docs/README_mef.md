@@ -54,7 +54,7 @@ The tool is built to ship fast, run every day, and improve from its own scoring 
 - **Lightweight vs. DAS.** Prefer the smallest schema and thinnest evidence stack that still produces useful output. Add complexity only after we've run it daily for a while.
 - **Fixed universe.** 305 stocks + 15 ETFs. No dynamic universe expansion in the near future.
 - **SHDB-only data in v1.** No DAS inputs (DAS isn't built). No RSE inputs yet either (RSE is still standing up). Both are candidates for later versions.
-- **Deterministic-first, LLM-reviewed.** A deterministic ranker produces the candidate list; Claude CLI reviews the top candidates as a final sanity check before publishing. The LLM adds context and color; it does not replace the ranker.
+- **Deterministic-first, LLM-reviewed.** Three independent deterministic engines — **trend** (continuation/breakout), **mean-reversion** (oversold bounce), and **value** (cheap + durable) — each produce their own top-N candidates. Claude CLI reviews the dedup'd union as a final sanity check and returns a synthesis ordering for the actionable email section. The LLM adds context and color; it does not replace the engines.
 - **"No new trades today" is valid output.** Expected and healthy on weak-evidence days.
 - **Ship, then iterate.** Goal is a working end-to-end daily run as fast as possible; refine evidence weights, LLM prompt, email format, and scoring in subsequent passes.
 
@@ -202,13 +202,18 @@ Each run executes the same pipeline; only the intent (today-after-10 vs. next-tr
  3. Load universe (305 + 15 from MEFDB)
  4. Pull evidence from SHDB for the full universe
  5. Data-freshness gate — abort run if the latest mart bar is too stale
- 6. Deterministic ranker produces candidates with posture + conviction
-    + draft entry/stop/target plans
- 7. Select top-N (conviction_threshold + max_new_ideas_per_run cap)
- 8. LLM gate (Claude CLI) — 3-way disposition (approve/review/reject)
-    + issue_type per candidate. See mef_llm_gate.md
+ 6. Three deterministic engines (trend / mean-reversion / value) each
+    score every universe symbol and produce their own RankedCandidate
+    with posture + conviction + draft entry/stop/target plan
+ 7. Per-engine top-N (select_per_engine) → dedup by symbol
+    (merge_for_llm) — each symbol appears in the LLM prompt at most
+    once, annotated with its per-engine conviction scores
+ 8. LLM gate (single Claude CLI call) — 3-way disposition per symbol
+    (approve/review/reject) + a synthesis ordering for the actionable
+    email list. See mef_llm_gate.md
  9. Insert mef.recommendation rows for approve + review + unavailable
-    (reject stays on mef.candidate only)
+    (reject stays on mef.candidate only), with source_engines populated
+    from every engine that picked the symbol
 10. Daily P&L snapshot — one mef.recommendation_pnl_daily row per
     active rec, plus close-day rows for newly-closed recs
 11. Score newly-closed recs (mef.score), shadow-score rejects
@@ -296,10 +301,16 @@ Each disposition carries an `issue_type` from a small enum (`mechanical`, `risk_
 
 What the LLM does **not** do:
 
-- Generate candidates from scratch (the ranker does that)
-- Decide whether "no new trades today" is the right answer (the ranker's thresholds decide that)
+- Generate candidates from scratch (the engines do that)
+- Decide whether "no new trades today" is the right answer (the engines' thresholds decide that; an empty synthesis is also valid)
 - Modify entry/exit prices (deterministic plan wins)
 - Browse, claim current news, or invent post-cutoff events
+
+What the LLM **does** do in the multi-engine world (2026-04-21 onward):
+
+- Reviews the union of per-engine top-Ns in a single prompt — sees each symbol once, annotated with per-engine conviction scores
+- Returns per-candidate approve/review/reject with issue_type + reason
+- Returns a `synthesis` array — its ordered top picks across all engines (bounded by `max_new_ideas`) that become the email's actionable section
 
 Every LLM call is logged to `mef.llm_trace` with prompt, response, model, elapsed time, and linkage to the owning `daily_run` and candidate. The prompt design philosophy, prompt source, and iteration guide live in **`mef_llm_gate.md`**.
 
@@ -317,9 +328,11 @@ Email body sections:
 
 - Header: run timestamp, intent (today-after-10 / next-trading-day), universe health
 - Optional staleness banner (`⚠` warn / `⛔` abort) when the data-freshness gate trips
-- **New ideas** (or "No new trades today") — each with R:R block per 100 shares + reasoning. Pullback-anchored entries carry a `⏳ wait for pullback (currently ~$X)` annotation on the entry-zone line.
+- Optional **Upcoming high-impact US macro events** banner (when the bundle has events within 3 days)
+- **New ideas** (or "No new trades today") — each with R:R block per 100 shares + reasoning + engine lineage badge (`[engine: trend]` or `[engines: trend+value]` for multi-engine picks). Pullback-anchored entries carry a `⏳ wait for pullback (currently ~$X)` annotation; earnings within 21 days carry a `📅 earnings in Nd` annotation. Ordering follows the LLM's synthesis.
 - **Held for review** — LLM-review-tagged ideas with full setup + LLM's one-sentence reason, so the user can decide whether to act manually
 - One-line footer noting how many additional ideas were rejected (review items are rendered explicitly above, not counted in the footer)
+- **Engine views** — raw per-engine top picks (trend / mean-rev / value, top-3 each) so the user can see what each engine surfaced before the LLM's synthesis narrowed to actionable
 - **Active recommendations & tracked positions** — status, guidance, revised levels
 - Footer: scoring summary (recent closes), links to CLI commands for detail
 

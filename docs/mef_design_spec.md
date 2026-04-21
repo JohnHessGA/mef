@@ -207,7 +207,7 @@ built from the ETF universe pull itself — no extra query.
 
 ### 6.2 Ranker — three-engine ensemble
 
-As of 2026-04-22, MEF runs three independent deterministic engines per
+As of 2026-04-21, MEF runs three independent deterministic engines per
 run. Each produces its own top-N. The three top-Ns dedup into a
 unique-by-symbol list that goes to a single LLM call, which returns
 per-candidate dispositions AND a synthesis ordering for the actionable

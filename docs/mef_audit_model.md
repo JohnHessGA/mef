@@ -1,6 +1,6 @@
 # MEF Audit Data Model
 
-Version: 2026-04-20
+Version: 2026-04-21
 Status: Reference — update when scoring tables or columns change.
 
 MEF stores **four parallel scoring tables** that together answer
@@ -8,6 +8,24 @@ MEF stores **four parallel scoring tables** that together answer
 table has a focused purpose; together they collapse the validation
 horizon from "wait months for John to actually buy something and
 close it" to "wait weeks for `time_exit` dates to pass."
+
+**2026-04-21 update — per-engine attribution.** `mef.shadow_score`
+and `mef.paper_score` both carry an `engine` column (`'trend'`,
+`'mean_reversion'`, or `'value'`) so audit queries can ask "which
+ranker engine's conviction predicts wins best?" The column is set
+at INSERT from the candidate's engine (migration 009 backfilled
+existing rows). Example:
+
+```sql
+SELECT engine,
+       outcome,
+       COUNT(*) AS n,
+       AVG(estimated_pnl_100_shares_usd) AS avg_pnl
+  FROM mef.paper_score
+ WHERE gate_decision = 'approve'
+ GROUP BY engine, outcome
+ ORDER BY engine, outcome;
+```
 
 ---
 

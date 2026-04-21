@@ -135,11 +135,11 @@ get forgotten):
 
 ### Ensemble of independent ranker engines
 
-**Status change 2026-04-23:** SHIPPED (monitoring). The single
+**Status change 2026-04-21:** SHIPPED (monitoring). The single
 trend-follower was expanded into a three-engine ensemble — trend,
 mean-reversion, value — each scoring independently, with a single
 LLM call receiving the dedup'd union and returning a synthesis
-ordering. See `mef_build_order.md` 2026-04-23 status note for
+ordering. See `mef_build_order.md` 2026-04-21 status note for
 commit-by-commit breakdown, `mef_design_spec.md` §6.2 for the
 architecture, and `mef_llm_gate.md` structural choice #7 for the
 multi-engine prompt design.

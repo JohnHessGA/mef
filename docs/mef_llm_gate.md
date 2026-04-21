@@ -1,6 +1,6 @@
 # MEF LLM Gate
 
-Version: 2026-04-23
+Version: 2026-04-21
 Status: Active design — update when the prompt or disposition vocabulary changes.
 
 The LLM is a **gate**, not an idea generator. The deterministic ranker
@@ -100,7 +100,7 @@ Key structural choices:
 
 6. **Pullback-setup special rule** (added 2026-04-21) — each candidate line carries a `pullback_setup=true|false` flag. When true, the ranker has intentionally anchored the entry zone *below* the current close because the stock is at/near its recent peak. The prompt has a dedicated SPECIAL RULE section instructing the LLM to NOT flag the current-price-vs-entry-range gap as a `risk_shape` issue on pullback setups, and to compute risk/reward from the entry-zone midpoint rather than current close. Prevents a false-positive review verdict that surfaced the first time the pullback feature landed (AEP on 2026-04-20 run DR-000017).
 
-7. **Multi-engine aware** (added 2026-04-22) — each candidate line shows per-engine conviction scores (`engines=[trend=0.82 value=0.71 ...]`). A new SPECIAL RULE FOR MULTI-ENGINE CANDIDATES section tells the LLM that engine agreement is signal and disagreement is context (not a rejection — each engine's best pick may legitimately not interest the others). Output schema adds a `synthesis` array — the LLM's ordered top-picks across all engines, bounded by `max_new_ideas`. Only symbols it approved are valid in synthesis; the parser drops any that disagree. Empty synthesis is valid ("no new trades today").
+7. **Multi-engine aware** (added 2026-04-21) — each candidate line shows per-engine conviction scores (`engines=[trend=0.82 value=0.71 ...]`). A new SPECIAL RULE FOR MULTI-ENGINE CANDIDATES section tells the LLM that engine agreement is signal and disagreement is context (not a rejection — each engine's best pick may legitimately not interest the others). Output schema adds a `synthesis` array — the LLM's ordered top-picks across all engines, bounded by `max_new_ideas`. Only symbols it approved are valid in synthesis; the parser drops any that disagree. Empty synthesis is valid ("no new trades today").
 
 8. **JSON-only output** — strict output schema with `reviews` array and `synthesis` array (empty when the prompt is single-engine or when the LLM declines to synthesize).
 

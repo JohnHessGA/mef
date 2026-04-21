@@ -33,7 +33,7 @@ A typical email looks like:
 MEF pre-market report
 =====================
 
-Run:      DR-000018 (premarket, completed 07:00 EDT)
+Run:      DR-000025 (premarket, completed 07:00 EDT)
 Date:     2026-04-21
 Intent:   trades for today (after 10:00 ET)
 Universe: 305 stocks, 15 ETFs
@@ -42,21 +42,24 @@ Universe: 305 stocks, 15 ETFs
    - 2026-04-21  Retail Sales MoM (Mar)
    - 2026-04-22  Fed Press Conference
 
-New ideas (2):
-  1. WMT — bullish — buy_shares  📅 earnings in 18d
-     Entry zone: $124.95-$127.50
-     Stop:       $118.58
-     Target:     $137.70
-     Time exit:  2026-05-17
-     Per 100 shares: potential +$1,020.00 · risk $892.00 · R:R 1.14:1
-     Reasoning:  Conservative setup with stable defensive sector,
-                 moderate vol_z, solid R:R, positive MACD.
-  2. JCI — bullish — buy_shares
+New ideas (3):
+  1. TGT — value_quality — buy_shares  [engine: value]
+     Entry zone: $126.56-$129.12
+     Stop:       $115.06
+     Target:     $140.62
+     Time exit:  2026-06-16
+     Per 100 shares: potential +$1,278.00 · risk $1,278.00 · R:R 1.00:1
+     Reasoning:  Value-quality setup with strong metrics across all
+                 timeframes; low vol; balanced risk/reward.
+  2. JCI — bullish — buy_shares  [engine: trend]  📅 earnings in 16d
      Entry zone: $138.05-$140.87
+     ...
+  3. PSX — oversold_bouncing — buy_shares  [engine: mean-rev]
+     Entry zone: $154.81-$157.93
      ...
 
 Held for review (2) — LLM flagged these for human attention, not auto-ship:
-  1. AEP — bullish — buy_shares
+  1. AEP — bullish — buy_shares  [engines: trend+value]
      Entry zone: $129.68-$132.30  ⏳ wait for pullback (currently ~$133.66)
      Stop:       $121.90
      Target:     $141.68
@@ -64,8 +67,21 @@ Held for review (2) — LLM flagged these for human attention, not auto-ship:
      Per 100 shares: potential +$802.00 · risk $1,176.00 · R:R 0.68:1
      Reasoning:  Pullback setup is mechanically coherent, but tight
                  R:R with flat MACD appears fragile.
-  2. BMY — bullish — buy_shares
-     ...
+  ...
+
+Engine views (raw per-engine top picks):
+  Trend top 3:
+    1. JCI    conv=0.89  bullish
+    2. TJX    conv=0.82  bullish
+    3. ACGL   conv=0.80  bullish
+  Mean-rev top 3:
+    1. PSX    conv=0.65  oversold_bouncing
+    2. SYY    conv=0.61  oversold_bouncing
+    3. TMUS   conv=0.61  oversold_bouncing
+  Value top 3:
+    1. TGT    conv=0.71  value_quality
+    2. MRK    conv=0.70  value_quality
+    3. PFE    conv=0.70  value_quality
 
 CLI: mef show <rec-id> · mef dismiss <rec-id> · mef status
 ```
