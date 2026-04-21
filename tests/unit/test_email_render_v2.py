@@ -175,6 +175,118 @@ def test_header_no_etf_tag_on_stock():
     assert "JCI:etf" not in email.body
 
 
+def test_header_tier_high_for_conviction_at_or_above_070():
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-H", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(symbol="AAA", conviction_score=0.71, current_price=270.00)],
+    )
+    assert "AAA ($270.00) · high" in email.body
+
+
+def test_header_tier_medium_below_070():
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-M", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(symbol="BBB", conviction_score=0.55, current_price=100.00)],
+    )
+    assert "BBB ($100.00) · medium" in email.body
+
+
+def test_tier_boundary_at_070_is_high():
+    # The ≥ 0.70 boundary should land in "high" exactly (not medium).
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-B", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(symbol="CCC", conviction_score=0.70, current_price=270.00)],
+    )
+    assert "CCC ($270.00) · high" in email.body
+
+
+def test_detail_labels_renamed_buy_near_sell_below_sell_above_hold():
+    # The label rename from Entry zone / Stop / Target / Time exit to
+    # Buy near / Sell below / Sell above / Suggested hold must appear
+    # in the body. Old labels should be gone entirely.
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-L", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea()],
+    )
+    body = email.body
+    assert "Buy near:" in body
+    assert "Sell below:" in body
+    assert "Sell above:" in body
+    assert "Suggested hold:" in body
+    # Old labels gone — regression guard.
+    assert "Entry zone:" not in body
+    assert "\n     Stop:" not in body
+    assert "Target:" not in body
+    assert "Time exit:" not in body
+
+
+def test_suggested_hold_carries_through_phrasing():
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-H2", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea()],
+    )
+    assert "Suggested hold:  through 2026-05-19" in email.body
+
+
+def test_summary_block_counts_tiers_and_engine_lineage():
+    # Three emitted ideas: two high tier + one medium; one picked by
+    # two engines (cross-engine) and two single-engine. Plus 2 review-
+    # tagged. Summary should surface those counts.
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-S", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[
+            _idea(symbol="A", conviction_score=0.80, source_engines=["trend", "value"]),
+            _idea(symbol="B", conviction_score=0.75, source_engines=["trend"]),
+            _idea(symbol="C", conviction_score=0.55, source_engines=["mean_reversion"]),
+        ],
+        review_ideas=[
+            _idea(rec_uid="R-REV-1", symbol="TSLA", llm_gate="review"),
+            _idea(rec_uid="R-REV-2", symbol="AEP", llm_gate="review"),
+        ],
+    )
+    body = email.body
+    assert "Summary" in body
+    assert "Final MEF list: 3 symbols (2 high, 1 medium)" in body
+    assert "Cross-engine confirmations: 1" in body
+    assert "Single-engine ideas: 2" in body
+    assert "Held for LLM review: 2" in body
+
+
+def test_summary_with_no_new_ideas_still_renders():
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-E", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[],
+        review_ideas=[],
+    )
+    assert "Final MEF list: 0 symbols" in email.body
+    assert "Cross-engine confirmations: 0" in email.body
+
+
+def test_summary_singular_symbol_phrasing():
+    # Edge case: one symbol shouldn't read "1 symbols".
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-1", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(symbol="A", conviction_score=0.75, source_engines=["trend"])],
+    )
+    assert "Final MEF list: 1 symbol " in email.body
+
+
 def test_header_omits_price_when_none_available():
     # Safety net: a row with no price at all (neither price_check nor
     # current_price) must not render "($None)" or crash.
@@ -184,7 +296,10 @@ def test_header_omits_price_when_none_available():
         stocks_in_universe=305, etfs_in_universe=15,
         new_ideas=[_idea(symbol="XYZ")],
     )
-    assert "XYZ — bullish" in email.body
+    # Whatever tier the default _idea() rolls into, the symbol must still
+    # render without a "($None)" price hole or a crash.
+    assert "XYZ · " in email.body
+    assert "bullish" in email.body
     assert "($None)" not in email.body
 
 

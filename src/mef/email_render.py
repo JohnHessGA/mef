@@ -41,6 +41,34 @@ def _fmt_ratio(v: float | None) -> str:
     return f"{v:.2f}:1" if v is not None else "n/a"
 
 
+# Conviction tier taxonomy. The emission threshold is 0.50; anything
+# below that never becomes a recommendation. Among the emitted, we
+# split the ≥ 0.70 bucket out so the reader can see at a glance which
+# picks are genuinely high-conviction vs marginal. Tier thresholds are
+# intentionally hard-coded here (not in config) — they're a display
+# taxonomy, not a tunable part of the scoring path.
+TIER_HIGH = "high"
+TIER_MEDIUM = "medium"
+TIER_HIGH_THRESHOLD = 0.70
+
+
+def _conviction_tier(conv: float | None) -> str:
+    if conv is None:
+        return TIER_MEDIUM
+    return TIER_HIGH if conv >= TIER_HIGH_THRESHOLD else TIER_MEDIUM
+
+
+# Label column width for the indented idea-detail lines. Wide enough
+# for "Suggested hold:" (15 chars including the colon) + 2 spaces of
+# padding. Used to right-pad every label so the values line up.
+_LABEL_W = 15
+
+
+def _kv(label: str, value: str) -> str:
+    """Render one 'Label: value' line with consistent column alignment."""
+    return f"     {(label + ':').ljust(_LABEL_W + 1)} {value}"
+
+
 def _unavailable_reason_suffix(kind: str | None) -> str:
     """Human-friendly suffix for the 'LLM gate was unavailable' banner.
 
@@ -103,7 +131,11 @@ def _idea_lines(idx: int, idea: dict[str, Any]) -> list[str]:
     posture = idea.get("posture", "?")
     expression = idea.get("expression", "?")
     badge = _engine_badge(idea.get("source_engines"))
-    header = f"  {idx}. {_symbol_label(idea)} — {posture} — {expression}{badge}"
+    tier = _conviction_tier(idea.get("conviction_score"))
+    header = (
+        f"  {idx}. {_symbol_label(idea)} · {tier} — "
+        f"{posture} — {expression}{badge}"
+    )
     # Earnings annotation on the symbol line when an announcement is
     # within the caution horizon (≤21 days). Informational only — the
     # ranker already vetoed or penalized per its own thresholds, so by
@@ -127,50 +159,91 @@ def _idea_lines(idx: int, idea: dict[str, Any]) -> list[str]:
     # the user to run `mef show <rec-id>` without ever printing an id.
     rec_uid = idea.get("rec_uid")
     if rec_uid:
-        lines.append(f"     Rec ID:     {rec_uid}")
+        lines.append(_kv("Rec ID", rec_uid))
 
     entry_zone = idea.get("entry_zone")
     if entry_zone:
         if idea.get("needs_pullback"):
             current = idea.get("current_price")
-            price_hint = f" (currently ~${current:,.2f})" if current is not None else ""
-            lines.append(f"     Entry zone: {entry_zone}  ⏳ wait for pullback{price_hint}")
+            price_hint = f"  ⏳ wait for pullback"
+            if current is not None:
+                price_hint += f" (currently ~${current:,.2f})"
+            lines.append(_kv("Buy near", f"{entry_zone}{price_hint}"))
         else:
-            lines.append(f"     Entry zone: {entry_zone}")
+            lines.append(_kv("Buy near", entry_zone))
 
     # Price-freshness annotation from mef.price_check. Emitted on its
     # own line so it's visible without cramming the entry-zone line.
     # Only renders when the tier is info or warn (< 1% moves are silent).
     price_note = idea.get("price_check_note")
     if price_note:
-        lines.append(f"     Price check: {price_note}")
+        lines.append(_kv("Price check", price_note))
     stop = idea.get("stop")
     target = idea.get("target")
     time_exit = idea.get("time_exit")
     if stop is not None:
-        lines.append(f"     Stop:       ${stop:,.2f}")
+        lines.append(_kv("Sell below", f"${stop:,.2f}"))
     if target is not None:
-        lines.append(f"     Target:     ${target:,.2f}")
+        lines.append(_kv("Sell above", f"${target:,.2f}"))
     if time_exit is not None:
-        lines.append(f"     Time exit:  {time_exit}")
+        lines.append(_kv("Suggested hold", f"through {time_exit}"))
 
     gain = idea.get("potential_gain_100sh")
     loss = idea.get("potential_loss_100sh")
     rr = idea.get("risk_reward")
     if gain is not None or loss is not None:
-        lines.append(
-            f"     Per 100 shares: potential +{_fmt_money(gain)} · "
-            f"risk {_fmt_money(loss)} · R:R {_fmt_ratio(rr)}"
-        )
+        lines.append(_kv(
+            "Per 100 shares",
+            f"potential +{_fmt_money(gain)} · risk {_fmt_money(loss)} · R:R {_fmt_ratio(rr)}",
+        ))
 
     reasoning = idea.get("reasoning_summary")
     if reasoning:
-        lines.append(f"     Reasoning:  {reasoning}")
+        lines.append(_kv("Reasoning", reasoning))
 
     gate = idea.get("llm_gate")
     if gate == "unavailable":
         lines.append("     ⚠ Not reviewed by LLM (gate unavailable).")
     return lines
+
+
+def _summary_block(
+    new_ideas: list[dict[str, Any]],
+    review_ideas: list[dict[str, Any]],
+) -> list[str]:
+    """Top-of-email summary counts.
+
+    The "Final MEF list" count is what actually ships in New ideas
+    (LLM-approved plus unavailable-fallback). Cross-engine vs single-
+    engine counts are derived from each idea's ``source_engines`` —
+    more than one engine → cross-engine confirmation. "Held for LLM
+    review" counts the review-tagged set rendered in its own section.
+    """
+    n_final = len(new_ideas)
+    tiers = [_conviction_tier(i.get("conviction_score")) for i in new_ideas]
+    n_high = sum(1 for t in tiers if t == TIER_HIGH)
+    n_medium = n_final - n_high
+    cross = sum(1 for i in new_ideas if len(i.get("source_engines") or []) > 1)
+    single = n_final - cross
+
+    if n_final:
+        sym_word = "symbol" if n_final == 1 else "symbols"
+        final_line = (
+            f"Final MEF list: {n_final} {sym_word} "
+            f"({n_high} high, {n_medium} medium)"
+        )
+    else:
+        final_line = "Final MEF list: 0 symbols"
+
+    return [
+        "Summary",
+        "-------",
+        final_line,
+        f"Cross-engine confirmations: {cross}",
+        f"Single-engine ideas: {single}",
+        f"Held for LLM review: {len(review_ideas)}",
+        "",
+    ]
 
 
 def render_daily_email(
@@ -252,6 +325,11 @@ def render_daily_email(
             "ideas below were not reviewed."
         )
         lines.append("")
+
+    # Top-of-email summary — skipped on staleness-aborted runs where
+    # there are no ideas to summarize.
+    if not staleness_aborted:
+        lines.extend(_summary_block(new_ideas, review_ideas))
 
     if upcoming_macro_events and not staleness_aborted:
         lines.append("📅 Upcoming high-impact US macro events:")

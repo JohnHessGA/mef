@@ -374,6 +374,7 @@ def _insert_recommendations(
                 "symbol":            cand.symbol,
                 "asset_kind":        cand.asset_kind,
                 "posture":           cand.posture,
+                "conviction_score":  cand.conviction_score,
                 "expression":        cand.proposed_expression,
                 "entry_zone":        cand.proposed_entry_zone,
                 "stop":              cand.proposed_stop,

@@ -719,26 +719,32 @@ Header
 ⚠ LLM gate was unavailable for this run due to LLM timeouts   ← only on
    — ideas below were not reviewed.                              gate outages
 
+Summary
+-------
+Final MEF list: K symbols (N high, M medium)
+Cross-engine confirmations: X
+Single-engine ideas: Y
+Held for LLM review: J
+
 New ideas (K):  ← LLM-approved + unavailable-fallback
-  1. SYMBOL[:etf] ($price) — posture — expression  [engine: …]  [📅 earnings in 14d]
-     Rec ID:     R-000xxx
-     Entry zone: $LOW-$HIGH     [⏳ wait for pullback (currently ~$PX)]
-     Price check: moved +1.7% since close (live ~$X.XX)   ← only when tier
-                                                            is info or warn
-     Stop:       $…
-     Target:     $…
-     Time exit:  YYYY-MM-DD
-     Per 100 shares: potential +$… · risk $… · R:R N.NN:1
-     Reasoning:  … (one sentence; prefers LLM reason, falls back to
-                  ranker notes)
+  1. SYMBOL[:etf] ($price) · high — posture — expression  [engine: …]  [📅 earnings in 14d]
+     Rec ID:          R-000xxx
+     Buy near:        $LOW-$HIGH     [⏳ wait for pullback (currently ~$PX)]
+     Price check:     moved +1.7% since close (live ~$X.XX)   ← tier info/warn
+     Sell below:      $…
+     Sell above:      $…
+     Suggested hold:  through YYYY-MM-DD
+     Per 100 shares:  potential +$… · risk $… · R:R N.NN:1
+     Reasoning:       … (one sentence; prefers LLM reason, falls back to
+                      ranker notes)
 
  (or: "No new trades today.")
 
 Held for review (J) — LLM flagged these for human attention, not auto-ship:
-  1. SYMBOL[:etf] ($price) — posture — expression
-     Rec ID:     R-000xxx
+  1. SYMBOL[:etf] ($price) · medium — posture — expression
+     Rec ID:          R-000xxx
      (same block as "New ideas", with pullback + price-check annotations)
-     Reasoning:  … (LLM's one-sentence review reason)
+     Reasoning:       … (LLM's one-sentence review reason)
   …
 
   Also from this run: N rejected (logged for audit).   ← rejected-only footer;
@@ -753,11 +759,22 @@ Active recommendations & tracked positions (M):
 CLI: mef show <rec-id> · mef dismiss <rec-id> · mef status
 ```
 
-**Symbol header.** `SYMBOL[:etf] ($price)` — the price is the live
-Yahoo quote from `mef.price_check` when that ran successfully, else the
-SHDB close used at scoring time. The `:etf` tag appears only on ETF
-ideas so the reader sees at a glance that a symbol isn't a single-name
-trade. Omits the parenthetical entirely when no price is available.
+**Symbol header.** `SYMBOL[:etf] ($price) · tier` — the price is the
+live Yahoo quote from `mef.price_check` when that ran successfully,
+else the SHDB close used at scoring time. The `:etf` tag appears only
+on ETF ideas so the reader sees at a glance that a symbol isn't a
+single-name trade. `tier` is `high` (conviction ≥ 0.70) or `medium`
+(0.50–0.70); the ≥ 0.70 boundary falls into `high`. Omits the price
+parenthetical entirely when no price is available.
+
+**Summary block.** Rendered right after the gate banner and before
+the macro-events banner (skipped on staleness-aborted runs). Counts
+what the email actually contains, not the universe: the final-list
+tier split, how many picks were cross-engine confirmations
+(`len(source_engines) > 1`) vs single-engine, and the held-for-review
+count. Designed for a 10-second glance — the block answers "what did
+MEF actually recommend today, and how many did it hold back?" before
+the reader scrolls into details.
 
 **Rec ID line.** Every idea prints its `R-0000xx` so the closing CLI
 hint (`mef show <rec-id>`) is directly actionable from the email.
