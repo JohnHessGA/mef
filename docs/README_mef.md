@@ -417,6 +417,10 @@ It does **not** inherit from the retired XPM tool. References should be to RSE g
 | Stock universe (305) | `notes/focus-universe-us-stocks-final.md` |
 | ETF universe (15) | `notes/core-us-etfs-daily-final.md` |
 | Technical design | `docs/mef_design_spec.md` |
+| Operations guide | `docs/mef_operations.md` |
+| LLM gate details | `docs/mef_llm_gate.md` |
+| Build order / status notes | `docs/mef_build_order.md` |
+| **Out-of-scope decisions** | `docs/mef_out_of_scope.md` |
 | System-wide conventions | `~/repos/notes/conventions.md` |
 | Database catalog | `~/repos/notes/databases.md` |
 | Peer applications | `~/repos/notes/iraguard.md`, `~/repos/notes/rse.md` |

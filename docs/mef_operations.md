@@ -38,8 +38,12 @@ Date:     2026-04-21
 Intent:   trades for today (after 10:00 ET)
 Universe: 305 stocks, 15 ETFs
 
+📅 Upcoming high-impact US macro events:
+   - 2026-04-21  Retail Sales MoM (Mar)
+   - 2026-04-22  Fed Press Conference
+
 New ideas (2):
-  1. WMT — bullish — buy_shares
+  1. WMT — bullish — buy_shares  📅 earnings in 18d
      Entry zone: $124.95-$127.50
      Stop:       $118.58
      Target:     $137.70

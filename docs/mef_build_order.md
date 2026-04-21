@@ -49,5 +49,10 @@ Items past #16 that remain out of scope for v1 (web UI, DAS integration, RSE int
   - `8d09661` LLM prompt candidate block expanded (ret5d/63d/252d, sma20_slope, rv20/rv63, rs_vs_spy_63d, rs_vs_qqq_63d) so the LLM sees the same signals the ranker weighs
   Preview against 2026-04-17 evidence: JCI climbed from conv 0.80 → 0.97 (all signals aligned); TSLA dropped from top to #10 (252d damage + multi-timeframe); the extended names that drove the original complaint (STX, LITE, CSCO, CSX) left the top 5 entirely.
 - **Known ranker blind spots for next iteration pass** — "falling knife" still only caught via the 5d brake, not sma_20 direction in the `needs_pullback` path; range-bound-above-SMAs catches most but not all chop (BMY still surfaced on 2026-04-21 preview — slope threshold may need tightening once data supports a pick).
+- **2026-04-21 event-date awareness** (MEF commit `e429505` + UDC commit `d2eb207`). Shipped after the ranker-tuning block above. Adds:
+  - Earnings proximity gate: graduated veto/penalty/flag based on `next_earnings_date` from `shdb.earnings_calendar_upcoming` (99.3% universe coverage, FMP source). Hard veto at ≤5d general / ≤10d for pullback setups. -0.15 penalty at 6-10d. -0.03 flag at 11-21d. Email annotates each idea with `📅 earnings in Nd` when ≤21 days.
+  - Macro-calendar overlay: -0.05 dampener when a US High-impact event lands today or tomorrow. Sources `shdb.economic_calendar` (UDC commit widened it to ingest forward dates; prior state was past-only). Email header banner renders upcoming events in a 3-day horizon.
+  - Live verification against 2026-04-17 evidence: SLB (earnings in 7d) dropped out of top-25 via -0.15 penalty; BMY/ACGL/ALL/JCI flagged with caution for earnings 11-19d out; Housing-Starts-today triggered the macro dampener for all emittable candidates.
+  - Event-date families deliberately **not** added (ex-dividends, FOMC as dedicated signal, news-volume overlays, options expiration, post-earnings drift) — see `mef_out_of_scope.md` for the rationale of each.
 
 Update this table whenever a milestone flips status.

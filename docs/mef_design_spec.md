@@ -190,6 +190,16 @@ through the fundamental rule untouched.
 
 **Sector** — used only for the sector-relative lookup.
 
+**Event-date context** — stocks carry `next_earnings_date` from
+`shdb.earnings_calendar_upcoming` (FMP, 99.3% universe coverage).
+Bundle-level `baseline["upcoming_high_impact_events"]` lists US
+High-impact macro releases (CPI, NFP, FOMC, retail sales) within
+3 days of `as_of_date`, pulled from `shdb.economic_calendar`. See
+`mef_out_of_scope.md` for the event-date families that were
+considered and deliberately excluded (ex-dividends, FOMC as a
+dedicated signal, news-volume overlays, options expiration,
+post-earnings drift).
+
 The evidence module also produces a `baseline` dict on the bundle:
 SPY's 20d/63d returns (legacy; ranker now reads `rs_vs_spy_*` columns
 directly) and a `sector_returns_63d` map keyed by sector ETF symbol,
@@ -260,6 +270,11 @@ Regardless-of-posture:
 | Rule                                      | Effect |
 |-------------------------------------------|--------|
 | `drawdown_current < -0.20` (deep drawdown) | -0.15 |
+| **Earnings within 5d (stocks)**            | **hard veto → `no_edge`** |
+| **Earnings within 10d + `needs_pullback`** | **hard veto → `no_edge`** |
+| Earnings 6–10d (non-pullback)              | -0.15 |
+| Earnings 11–21d                            | -0.03 (caution flag) |
+| High-impact US macro event in 0–1d (bullish/range_bound only) | -0.05 |
 | **Fundamentals (equities only)**: `free_cash_flow < 0` | **hard veto → `no_edge`, base = 0.0** |
 | `pe_trailing > 60`                         | -0.05 |
 | `earnings_yield` in (0, 0.02)              | -0.02 |
@@ -608,8 +623,12 @@ Header
   Intent: trades for today (after 10:00 ET)
   Universe: 305 stocks, 15 ETFs
 
+📅 Upcoming high-impact US macro events:   ← rendered only when bundle
+   - 2026-04-29  Fed Interest Rate Decision   has events in 0-3 day horizon
+   - 2026-04-30  Core PCE Price Index MoM (Mar)
+
 New ideas (K):  ← LLM-approved + unavailable-fallback
-  1. SYMBOL — posture — expression
+  1. SYMBOL — posture — expression  [📅 earnings in 14d]  ← if ≤21 days
      Entry zone: $LOW-$HIGH     [⏳ wait for pullback (currently ~$PX)]
      Stop:       $…
      Target:     $…
@@ -642,6 +661,17 @@ The pullback annotation (`⏳ wait for pullback (currently ~$X)`) fires
 when the candidate's `needs_pullback` flag is set (stock at/near its
 recent peak). The entry zone on the same line is a pullback-anchored
 resting-limit price below current — it fills on a dip or it doesn't.
+
+The earnings annotation (`📅 earnings in Nd`) appears on the symbol
+line when the candidate's `next_earnings_date` is within 21 days.
+Ideas with earnings ≤5 days (or ≤10 days on pullback setups) never
+reach the email — the ranker vetos them to `no_edge` upstream. By
+the time an idea hits the email, the annotation is context, not a
+warning.
+
+The macro banner (`📅 Upcoming high-impact US macro events`) is
+rendered only when the bundle carries events within a 3-day horizon.
+Quiet days produce no banner.
 
 The "Held for review" section carries the full setup (entry / stop /
 target / R:R) plus the LLM's one-sentence reason so the reader can
