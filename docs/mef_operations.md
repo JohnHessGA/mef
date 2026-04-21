@@ -18,12 +18,14 @@ MEF runs itself twice each weekday via cron (see `mef_cron.md`):
 | Pre-market | 07:00 ET  | Trades for **today, after 10:00 AM ET** |
 | Post-market| 17:30 ET  | Trades for the **next trading day**     |
 
-You will receive an email after each scheduled run. The email is
-**brief and action-oriented** by design — it shows only LLM-approved
-ideas (or, on the rare LLM-outage day, ideas marked "not reviewed").
-Recommendations the LLM held for review or rejected outright still get
-saved in MEFDB; they just don't appear in the email. See
-[Held for review](#held-for-review) below.
+You will receive an email after each scheduled run. The email has two
+idea sections: "New ideas" for LLM-approved (and unavailable-fallback)
+picks that are safe to auto-ship, and "Held for review" for LLM-review
+-tagged picks that need human judgment — each shown with the LLM's
+one-sentence reason so you can decide whether to act manually.
+Rejected ideas do not appear in the email; they're MEFDB-only and
+surface via `mef rejections`. See [Held for review](#held-for-review)
+below.
 
 A typical email looks like:
 
@@ -31,21 +33,35 @@ A typical email looks like:
 MEF pre-market report
 =====================
 
-Run:      DR-000017 (premarket, completed 07:00 EDT)
+Run:      DR-000018 (premarket, completed 07:00 EDT)
 Date:     2026-04-21
 Intent:   trades for today (after 10:00 ET)
 Universe: 305 stocks, 15 ETFs
 
-New ideas (1):
-  1. KLAC — bullish — buy_shares
-     Entry zone: $1517.87-$1548.85
-     Stop:       $1,440.43
-     Target:     $1,672.76
-     Time exit:  2026-05-07
-     Per 100 shares: potential +$12,391.00 · risk $10,842.00 · R:R 1.14:1
-     Reasoning:  Strong MACD recovery; low vol; clean R:R.
+New ideas (2):
+  1. WMT — bullish — buy_shares
+     Entry zone: $124.95-$127.50
+     Stop:       $118.58
+     Target:     $137.70
+     Time exit:  2026-05-17
+     Per 100 shares: potential +$1,020.00 · risk $892.00 · R:R 1.14:1
+     Reasoning:  Conservative setup with stable defensive sector,
+                 moderate vol_z, solid R:R, positive MACD.
+  2. JCI — bullish — buy_shares
+     Entry zone: $138.05-$140.87
+     ...
 
-  Also from this run: 4 held for review (logged for audit).
+Held for review (2) — LLM flagged these for human attention, not auto-ship:
+  1. AEP — bullish — buy_shares
+     Entry zone: $129.68-$132.30  ⏳ wait for pullback (currently ~$133.66)
+     Stop:       $121.90
+     Target:     $141.68
+     Time exit:  2026-05-17
+     Per 100 shares: potential +$802.00 · risk $1,176.00 · R:R 0.68:1
+     Reasoning:  Pullback setup is mechanically coherent, but tight
+                 R:R with flat MACD appears fragile.
+  2. BMY — bullish — buy_shares
+     ...
 
 CLI: mef show <rec-id> · mef dismiss <rec-id> · mef status
 ```
@@ -129,8 +145,8 @@ mef show R-000032
 
 Per the LLM gate's 3-way disposition (see `mef_llm_gate.md`):
 
-- **`approve`** → ships in the email
-- **`review`** → saved as a recommendation but **withheld from the email**
+- **`approve`** → ships in the email's "New ideas" section
+- **`review`** → ships in the email's separate **"Held for review"** section with the LLM's one-sentence reason so you can decide whether to act manually. Also saved as a `proposed` recommendation.
 - **`reject`** → not saved as a recommendation; lives only on `mef.candidate` for audit
 
 To see review-flagged ideas from the latest run:

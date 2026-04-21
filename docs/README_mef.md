@@ -83,7 +83,7 @@ The tool is built to ship fast, run every day, and improve from its own scoring 
   - Infer user's actual holdings from daily Fidelity Positions CSV ingest (same pattern as IRA Guard)
   - Track every MEF recommendation through its lifecycle (see §"Recommendation Lifecycle")
   - **Activation provenance** stamped at promote time (`mef_attributed` / `pre_existing` / `independent`) so future audits don't conflate ambient trades with MEF-driven ones
-- **Two daily emails** sent via direct SMTP (`smtplib` reading SMTP credentials from MDC's `notifications.yaml`) — **not** via MDC's `notify.py`, which forces its own subject/body wrapper that would mangle MEF's report. Email shows only LLM-approved (and unavailable-fallback) ideas; review-tagged and rejected ideas live in MEFDB and are visible via the CLI.
+- **Two daily emails** sent via direct SMTP (`smtplib` reading SMTP credentials from MDC's `notifications.yaml`) — **not** via MDC's `notify.py`, which forces its own subject/body wrapper that would mangle MEF's report. Email shows LLM-approved (and unavailable-fallback) ideas as "New ideas"; LLM-review-tagged ideas appear in a separate "Held for review" section with the LLM's one-sentence reason visible so the user can decide whether to act manually. Rejected ideas remain MEFDB-only and surface via the CLI.
 - **Data-freshness gate** — pipeline checks the latest mart bar age before ranking; warns above one threshold, aborts above another so MEF never ranks against silently-stale UDC data
 - CLI for operator use: run, status, list/show/dismiss/tag recommendations, link real trades, gate-audit, rejections, score, init-db, universe — see `mef_operations.md` for the full quick reference
 - **Four-table scoring corpus** (see `mef_audit_model.md`):
@@ -214,8 +214,9 @@ Each run executes the same pipeline; only the intent (today-after-10 vs. next-tr
 11. Score newly-closed recs (mef.score), shadow-score rejects
     (mef.shadow_score), paper-score every emitted rec (mef.paper_score)
 12. Render and send the email (direct SMTP — see Output below).
-    Email shows only LLM-approved + unavailable ideas; review-tagged
-    and rejected ideas live in MEFDB and surface via the CLI.
+    Email shows LLM-approved + unavailable ideas as "New ideas" and
+    LLM-review-tagged ideas in a separate "Held for review" section
+    (with the LLM's reason visible). Rejected ideas stay MEFDB-only.
 13. Close mef.daily_run (status=ok) + complete ow.mef_run with counts
 ```
 
@@ -287,8 +288,8 @@ MEF uses **Claude CLI (`claude -p`)** for the final-review step. The integration
 
 The LLM is a **gate**, not an idea generator. It returns a 3-way disposition per candidate:
 
-- `approve` — safe to ship as-is. Becomes a recommendation, appears in the email.
-- `review` — not safe to auto-ship. Becomes a recommendation, **withheld from email**, visible via `mef recommendations --state proposed`.
+- `approve` — safe to ship as-is. Becomes a recommendation, appears in the email as "New ideas".
+- `review` — not safe to auto-ship. Becomes a recommendation, shown in the email under a separate **"Held for review"** section with the LLM's one-sentence reason so the user can decide whether to act manually. Also visible via `mef recommendations --state proposed`.
 - `reject` — not shipped. Audit trail on `mef.candidate.llm_gate_decision/reason/issue_type`.
 
 Each disposition carries an `issue_type` from a small enum (`mechanical`, `risk_shape`, `volatility_mismatch`, `posture_mismatch`, `asset_structure`, `options_structure`, `missing_context`, `none`) that's server-validated against a SQL CHECK constraint.
@@ -310,14 +311,15 @@ If the LLM call fails, MEF ships the ideas anyway tagged `unavailable` ("Not rev
 
 **Two emails per trading day** (pre-market and post-market), sent via **direct SMTP** (`smtplib` reading SMTP credentials from MDC's `notifications.yaml`). MEF deliberately does **not** route through MDC's `notify.py`, which forces its own subject/body wrapper that would mangle the report. Both emails always send — there is no "quiet when nothing changes" behavior. A weak-evidence day produces a short email that says so. Aside from these two scheduled emails, MEF sends **no other notifications** — no SMS, no per-event alerts, no failure pages. Operational failures surface via Overwatch and cron logs.
 
-The email shows only LLM-approved (and unavailable-fallback) ideas; review-tagged and rejected ideas live in MEFDB and are visible via `mef recommendations --state proposed` and `mef rejections`.
+The email shows LLM-approved (and unavailable-fallback) ideas as "New ideas" and LLM-review-tagged ideas in a separate "Held for review" section with the LLM's one-sentence reason visible. Rejected ideas stay MEFDB-only and are visible via `mef recommendations --state proposed` and `mef rejections`.
 
 Email body sections:
 
 - Header: run timestamp, intent (today-after-10 / next-trading-day), universe health
 - Optional staleness banner (`⚠` warn / `⛔` abort) when the data-freshness gate trips
-- **New ideas** (or "No new trades today") — each with R:R block per 100 shares + reasoning
-- One-line footer noting how many additional ideas were held for review or rejected
+- **New ideas** (or "No new trades today") — each with R:R block per 100 shares + reasoning. Pullback-anchored entries carry a `⏳ wait for pullback (currently ~$X)` annotation on the entry-zone line.
+- **Held for review** — LLM-review-tagged ideas with full setup + LLM's one-sentence reason, so the user can decide whether to act manually
+- One-line footer noting how many additional ideas were rejected (review items are rendered explicitly above, not counted in the footer)
 - **Active recommendations & tracked positions** — status, guidance, revised levels
 - Footer: scoring summary (recent closes), links to CLI commands for detail
 
@@ -391,7 +393,7 @@ UID prefixes: `DR-` daily_run, `C-` candidate, `R-` recommendation, `U-` recomme
 
 ## Build Order
 
-The canonical, living tracker is **`mef_build_order.md`** — that file shows current status of every milestone (✅ done / ⏳ next / 🅿 parked). As of 2026-04-20, milestones 1-15 are done (full daily loop, validation infrastructure, 3-way LLM gate, provenance, daily P&L tracking, report+show polish); milestone 16 (iteration: prompt tuning, evidence-weight tuning, Grafana dashboards) is next; milestone 17 (universe management) is parked until ~3 months of scoring data exist.
+The canonical, living tracker is **`mef_build_order.md`** — that file shows current status of every milestone (✅ done / ⏳ next / 🅿 parked). As of 2026-04-21, milestones 1-15 are done (full daily loop, validation infrastructure, 3-way LLM gate, provenance, daily P&L tracking, report+show polish); milestone 16 (iteration) is in active progress with a block of ranker-tuning changes shipped on 2026-04-21 — see the 2026-04-21 status note in `mef_build_order.md` for the full commit list; milestone 17 (universe management) is parked until ~3 months of scoring data exist.
 
 ---
 

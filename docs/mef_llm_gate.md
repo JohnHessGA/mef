@@ -1,6 +1,6 @@
 # MEF LLM Gate
 
-Version: 2026-04-20
+Version: 2026-04-21
 Status: Active design — update when the prompt or disposition vocabulary changes.
 
 The LLM is a **gate**, not an idea generator. The deterministic ranker
@@ -98,11 +98,20 @@ Key structural choices:
 
 5. **Options handling future-proofed** — the prompt has a section for option candidates already, but MEF v1 only emits stocks/ETFs so it never fires. When options arrive, no prompt change needed.
 
-6. **JSON-only output** — strict output schema with all four fields per review (`candidate_id`, `symbol`, `decision`, `issue_type`, `reason`).
+6. **Pullback-setup special rule** (added 2026-04-21) — each candidate line carries a `pullback_setup=true|false` flag. When true, the ranker has intentionally anchored the entry zone *below* the current close because the stock is at/near its recent peak. The prompt has a dedicated SPECIAL RULE section instructing the LLM to NOT flag the current-price-vs-entry-range gap as a `risk_shape` issue on pullback setups, and to compute risk/reward from the entry-zone midpoint rather than current close. Prevents a false-positive review verdict that surfaced the first time the pullback feature landed (AEP on 2026-04-20 run DR-000017).
+
+7. **JSON-only output** — strict output schema with all four fields per review (`candidate_id`, `symbol`, `decision`, `issue_type`, `reason`).
 
 The candidate block is rendered by `render_candidates_block()` and
 includes the `candidate_id` (e.g. `C-002881`) so the LLM's response
-can be matched back even if it reorders or drops symbols.
+can be matched back even if it reorders or drops symbols. The block
+surfaces the full set of signals the ranker weighs: `pullback_setup`,
+close, `return_5d` / `return_20d` / `return_63d` / `return_252d`,
+RSI14, MACD histogram, SMA20 slope, `rv20/rv63` vol ratio,
+`rs_vs_spy_63d`, `rs_vs_qqq_63d`, drawdown, `vol_z`, sector, and the
+draft plan. Keeping the LLM's view aligned with the ranker's scoring
+inputs stops the LLM from commenting on a strictly smaller feature
+set than the one that actually produced the conviction score.
 
 ---
 

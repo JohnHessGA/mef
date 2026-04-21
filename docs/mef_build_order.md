@@ -1,6 +1,6 @@
 # MEF Build Order
 
-Version: 2026-04-20
+Version: 2026-04-21
 
 Living checklist of MEF build milestones. Mirrors `docs/README_mef.md`
 §"Build Order" and `docs/mef_design_spec.md` §20; updated as milestones
@@ -35,5 +35,19 @@ Items past #16 that remain out of scope for v1 (web UI, DAS integration, RSE int
 - **First real run** (DR-000003): 320 symbols evaluated, 158 non-no_edge candidates, 5 emitted (STX, GEV, GLW, KLAC, LITE).
 - **First 3-way-gate run** (DR-000013, 2026-04-20): 0 approve / 3 review / 2 reject. LLM correctly used `review` with `issue_type=risk_shape` for "extended momentum, no pullback" setups (LITE +27%, STX +25% in 20d). Demonstrates the discriminating value of the new disposition vs the prior binary gate, which would have rejected outright.
 - **Audit corpus** as of 2026-04-20: 14 deferred shadow-scores (rejected candidates), 26 deferred paper-scores (emitted recs); none yet settled. Full picture comes online once `time_exit` dates start passing in early-to-mid May 2026.
+- **2026-04-21 ranker iteration** (milestone #16 work). Two-week block of ranker tuning driven by user review of live top-5 output. Shipped in this order:
+  - `c1834e1` bias away from "already ran up" names — tiered `return_20d` reward, extension-from-SMA50 penalty
+  - `3439d40` fix evidence pulling 10-day-old bars against large universe arrays (TimescaleDB planner quirk with `DISTINCT ON + ANY()`; rewritten as CTE-with-MAX)
+  - `845610e` pullback-aware entry zones — `needs_pullback` flag at `drawdown > -0.03` anchors entry below close on at-peak picks; ⏳ email annotation
+  - `8f9d1b8` LLM gate learns about `pullback_setup=true` so it stops flagging intentional below-current entries as `risk_shape`
+  - `088f32d` email renders LLM-review-tagged ideas in their own section with the LLM's reason visible
+  - `2f0c700` SMA-slope chop detection (|slopes| flat → range_bound; rising SMA20 bonus / rolling-over penalty)
+  - `368d302` multi-timeframe consensus with V-recovery-aware thresholds — counts "strong disagreements," not "perfect alignment," so normal recovery-window negativity doesn't penalize good stocks; 5d tactical brake for falling-knife cases
+  - `501607d` volatility contraction (`rv20d/rv63d < 0.80` → coiled) — positive signal for "ready to run," not just "already ran"
+  - `efab466` relative strength beyond SPY — `rs_vs_spy_63d`, `rs_vs_qqq_63d`, and sector-relative 63d via `SECTOR_TO_ETF`
+  - `b705290` fundamental sanity — `free_cash_flow < 0` is a hard veto; `pe_trailing > 60` and low `earnings_yield` are soft penalties (stocks only; ETFs fall through)
+  - `8d09661` LLM prompt candidate block expanded (ret5d/63d/252d, sma20_slope, rv20/rv63, rs_vs_spy_63d, rs_vs_qqq_63d) so the LLM sees the same signals the ranker weighs
+  Preview against 2026-04-17 evidence: JCI climbed from conv 0.80 → 0.97 (all signals aligned); TSLA dropped from top to #10 (252d damage + multi-timeframe); the extended names that drove the original complaint (STX, LITE, CSCO, CSX) left the top 5 entirely.
+- **Known ranker blind spots for next iteration pass** — "falling knife" still only caught via the 5d brake, not sma_20 direction in the `needs_pullback` path; range-bound-above-SMAs catches most but not all chop (BMY still surfaced on 2026-04-21 preview — slope threshold may need tightening once data supports a pick).
 
 Update this table whenever a milestone flips status.

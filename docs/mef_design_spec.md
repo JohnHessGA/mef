@@ -151,32 +151,128 @@ Both times finalized during implementation; they must sit after the daily SHDB r
 
 ## 6. Evidence & Ranker
 
-### 6.1 v1 evidence set (small on purpose)
+### 6.1 v1 evidence set
 
-- 20 / 50 / 200-day price trend posture
-- Short-term momentum (5 / 20-day return)
-- Volatility regime (rolling std / ATR-style)
-- Volume vs. 20-day average
-- SPY-relative 20 / 60-day performance
-- Sector-ETF-relative 20 / 60-day performance
-- Options presence / rough liquidity (used as a go/no-go for option-income expressions)
-- Earnings-within-N-days flag (suppresses or caveats ideas with near-term event risk)
+Pulled per universe symbol from `mart.stock_equity_daily` and
+`mart.stock_etf_daily` by `src/mef/evidence.py :: pull_latest_evidence`.
+The latest-bar-per-symbol fetch uses a CTE with `MAX(bar_date)` per
+symbol because the obvious `DISTINCT ON … WHERE symbol = ANY(%s)`
+pattern silently returns stale rows against TimescaleDB-chunked tables
+when the universe array is large (fixed 2026-04-20).
 
-Additional families from the overview doc (seasonality, news sentiment, documented strategy models, congressional / whale activity) are **deferred** until the SHDB-backed mapping is clear.
+**Trend posture** — `close`, `sma_20`, `sma_50`, `sma_200`,
+`trend_above_sma50`, `trend_above_sma200`, plus `sma_20_slope` and
+`sma_50_slope` (for chop detection and trend-direction signal).
+
+**Multi-timeframe returns** — `return_5d`, `return_20d`, `return_63d`,
+`return_126d`, `return_252d` (for the multi-timeframe consensus rule;
+`return_5d` is also the short-term direction brake).
+
+**Oscillators** — `rsi_14`, `macd_histogram`.
+
+**Volatility** — `realized_vol_20d`, `realized_vol_63d`, `bb_width`,
+`atr_14`. Used for the vol-contraction signal (ratio of 20d to 63d)
+and for sizing pullback entry zones (`close − 2·ATR`).
+
+**Position vs. peak** — `drawdown_current` (distance from 252d high).
+Anchors the `needs_pullback` flag at `drawdown > -0.03`.
+
+**Volume** — `volume_z_score`.
+
+**Relative strength (equities only)** — `rs_vs_spy_20d`,
+`rs_vs_spy_63d`, `rs_vs_qqq_63d`. Combined with sector-ETF 63d returns
+(extracted from the ETF bundle) to compute sector-relative strength via
+the `SECTOR_TO_ETF` map.
+
+**Fundamental sanity (equities only)** — `pe_trailing`,
+`free_cash_flow`, `earnings_yield`. ETFs have these as NULL and fall
+through the fundamental rule untouched.
+
+**Sector** — used only for the sector-relative lookup.
+
+The evidence module also produces a `baseline` dict on the bundle:
+SPY's 20d/63d returns (legacy; ranker now reads `rs_vs_spy_*` columns
+directly) and a `sector_returns_63d` map keyed by sector ETF symbol,
+built from the ETF universe pull itself — no extra query.
 
 ### 6.2 Ranker
 
-- Deterministic, per-symbol scorer returning:
-  - directional posture: `bullish` / `bearish_caution` / `range_bound` / `no_edge`
-  - a scalar conviction score
-  - a proposed expression (buy shares, covered call, cash-secured put, etc.)
-  - draft entry zone, stop / invalidation level, target, time-exit horizon
-- Sort by conviction within each directional posture.
-- Apply a **global minimum conviction threshold**; everything below is `no_edge` and ineligible to be emitted.
-- Cap emitted new ideas per run (target 3–5).
-- "No new trades today" is the honest, expected output on weak days.
+Deterministic, per-symbol scorer in `src/mef/ranker.py :: _score_symbol`.
 
-The ranker's rules and weights will iterate. The important property is that the ranker alone decides **whether** to emit and how many; the LLM step only reviews what the ranker proposed.
+**Return type.** Per symbol, emits a `RankedCandidate` with:
+- `posture` — `bullish` / `bearish_caution` / `range_bound` / `no_edge`
+- `conviction_score` — float in [0, 1]
+- `needs_pullback` — boolean; flags candidates at/near their recent
+  peak so `_draft_plan` anchors the entry zone to a pullback target
+  (higher of `sma_20`, `close − 2·ATR`, `close·0.93`, capped ≥2% below
+  close) instead of buying at the current print. Email surfaces this
+  with a "⏳ wait for pullback" annotation.
+- draft plan: expression, entry zone, stop, target, time-exit
+
+**Sorting / emission.** Sort candidates by `conviction_score` desc.
+Apply `conviction_threshold` and `max_new_ideas_per_run` (config).
+"No new trades today" is the intended output on weak days.
+
+**Scoring rules** (current — will iterate). Each rule adjusts `base`
+additively on top of the posture's starting value.
+
+Posture determination (from trend flags):
+- Above both SMAs → `bullish` starting base `0.55`
+- Above both SMAs AND both slopes near-flat (`|slope| / close <
+  0.08%/day`) → flip to `range_bound` base `0.40` ("chop above support")
+- Above both SMAs AND `RSI > 70` → flip to `range_bound` base `0.45`
+- Below both SMAs → `bearish_caution` base `0.45`
+- Mixed SMA trend → `range_bound` base `0.40`
+
+Bullish-branch bonuses / penalties (many also apply when the bullish
+path flipped to `range_bound` mid-scoring):
+
+| Rule                                      | Δ base |
+|-------------------------------------------|-------:|
+| `sma_20_slope > 0`                         | +0.03  |
+| `sma_20_slope` clearly negative            | -0.05  |
+| RSI 45–65 ("healthy")                      | +0.10  |
+| MACD histogram > 0                         | +0.05  |
+| `return_20d` in [2%, 8%] (modest)          | +0.05  |
+| `return_20d > 15%` (extended bounce)       | -0.10  |
+| `volume_z_score > 0.5`                     | +0.03  |
+| `close` ≤3% above SMA50 (coiled)           | +0.05  |
+| `close` >8% above SMA50 (extended)         | -0.08  |
+| `rs_vs_spy_20d > 0`                        | +0.03  |
+| `rs_vs_spy_20d < -3%`                      | -0.04  |
+| `rs_vs_spy_63d > 3%` (sustained)           | +0.02  |
+| `rs_vs_qqq_63d > 3%`                       | +0.02  |
+| `rs_vs_qqq_63d < -8%`                      | -0.02  |
+| Sector-relative 63d > 2%                    | +0.04  |
+| Sector-relative 63d < -5%                   | -0.03  |
+
+Cross-posture signals (apply to bullish + range_bound):
+
+| Rule                                                            | Δ base |
+|-----------------------------------------------------------------|-------:|
+| `realized_vol_20d / realized_vol_63d < 0.80` (vol contraction)   | +0.04  |
+| Ratio > 1.30 (vol expansion)                                     | -0.03  |
+| **Multi-timeframe consensus** — count "strong disagreements": `return_20d < -5%`, `return_63d < -10%`, `return_126d < -15%`, `return_252d < -25%`. 0 disagreements → +0.06; 1 → +0.02; 2 → -0.04; 3+ → -0.08. Thresholds are wide so normal V-recovery negativity doesn't trip them. | ± |
+| `return_5d < -1.5%` (falling this week) — standalone tactical brake | -0.08 |
+
+Regardless-of-posture:
+
+| Rule                                      | Effect |
+|-------------------------------------------|--------|
+| `drawdown_current < -0.20` (deep drawdown) | -0.15 |
+| **Fundamentals (equities only)**: `free_cash_flow < 0` | **hard veto → `no_edge`, base = 0.0** |
+| `pe_trailing > 60`                         | -0.05 |
+| `earnings_yield` in (0, 0.02)              | -0.02 |
+
+After all adjustments: `conviction_score = clamp(base, 0, 1)`.
+If `conviction < 0.40` → posture demoted to `no_edge`.
+
+**Separation of concerns.** The ranker alone decides whether to emit
+and how many. The LLM step (§10) only reviews what the ranker
+proposed — it never changes prices, posture, conviction, or the draft
+plan. See `mef_llm_gate.md` for prompt details, including the special
+rule for pullback setups that prevents the LLM from flagging the
+below-current entry zone as a risk_shape issue.
 
 ---
 
@@ -508,34 +604,50 @@ Subject: MEF pre-market report — YYYY-MM-DD (today after 10:00 ET)
 
 Header
   Run: DR-…, pre-market, completed HH:MM ET
-  Universe: 305 stocks, 15 ETFs (N evaluated)
-  SPY: …, broad posture: …
+  Date: YYYY-MM-DD
+  Intent: trades for today (after 10:00 ET)
+  Universe: 305 stocks, 15 ETFs
 
-New ideas (K):
+New ideas (K):  ← LLM-approved + unavailable-fallback
   1. SYMBOL — posture — expression
-     Entry: …
-     Stop / invalidation: …
-     Target: …
-     Time exit: …
-     Confidence: …
-     Reasoning: …  (from LLM)
+     Entry zone: $LOW-$HIGH     [⏳ wait for pullback (currently ~$PX)]
+     Stop:       $…
+     Target:     $…
+     Time exit:  YYYY-MM-DD
+     Per 100 shares: potential +$… · risk $… · R:R N.NN:1
+     Reasoning:  … (one sentence; prefers LLM reason, falls back to
+                  ranker notes)
 
  (or: "No new trades today.")
 
-Active recommendations & tracked positions (M):
-  SYMBOL (rec R-…)  state=active  thesis=intact
-    guidance: hold
-    stop: … (unchanged)
-    target: … (unchanged)
+Held for review (J) — LLM flagged these for human attention, not auto-ship:
+  1. SYMBOL — posture — expression
+     (same block as "New ideas", with pullback annotation if applicable)
+     Reasoning:  … (LLM's one-sentence review reason)
   …
 
-Scoring summary (last 30 days):
-  wins: X, losses: Y, timeouts: Z, net est. P&L/100 shares: $…
+  Also from this run: N rejected (logged for audit).   ← rejected-only footer;
+                                                         review items are rendered
+                                                         explicitly above, so not
+                                                         counted here
 
-Footer
-  CLI: mef show R-<id>, mef dismiss R-<id>, mef status
-  Run log: ow.mef_run DR-…
+Active recommendations & tracked positions (M):
+  SYMBOL  rec R-…  state=active  guidance=…
+  …
+
+CLI: mef show <rec-id> · mef dismiss <rec-id> · mef status
 ```
+
+The pullback annotation (`⏳ wait for pullback (currently ~$X)`) fires
+when the candidate's `needs_pullback` flag is set (stock at/near its
+recent peak). The entry zone on the same line is a pullback-anchored
+resting-limit price below current — it fills on a dip or it doesn't.
+
+The "Held for review" section carries the full setup (entry / stop /
+target / R:R) plus the LLM's one-sentence reason so the reader can
+judge whether to act manually without running `mef show`. Rejected
+ideas do not appear in the email; they're MEFDB-only and surface via
+`mef rejections`.
 
 Subject line differs between runs (`pre-market` vs `post-market`). The "no new trades today" case still sends a complete email with an empty New-ideas section — MEF never skips a scheduled email.
 
