@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from mef.llm.client import extract_json_block
+from mef.llm.client import _pick_answering_model, extract_json_block
 from mef.llm.gate import _parse_gate_response
 from mef.llm.prompts import build_gate_prompt, render_candidates_block
 
@@ -137,6 +137,46 @@ def test_parse_gate_response_reviews_not_list_raises():
 def test_parse_gate_response_empty_text_raises():
     with pytest.raises(ValueError):
         _parse_gate_response("")
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# _pick_answering_model — telemetry: pick the model that actually answered
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_pick_answering_model_prefers_high_output_token_entry():
+    """When the CLI reports multiple models, the one with the most output
+    tokens is the one that actually produced the response. Pre-fix we
+    picked the first dict key, which mis-attributed Opus calls to the
+    haiku intake helper."""
+    usage = {
+        "claude-haiku-4-5-20251001": {
+            "inputTokens": 348, "outputTokens": 14,
+        },
+        "claude-opus-4-7": {
+            "inputTokens": 5, "outputTokens": 1200,
+        },
+    }
+    assert _pick_answering_model(usage) == "claude-opus-4-7"
+
+
+def test_pick_answering_model_accepts_snake_case_token_keys():
+    """Defensive: the CLI envelope uses camelCase in practice, but snake_case
+    shouldn't break the picker if the CLI ever normalizes differently."""
+    usage = {
+        "alpha": {"output_tokens": 5},
+        "beta":  {"output_tokens": 999},
+    }
+    assert _pick_answering_model(usage) == "beta"
+
+
+def test_pick_answering_model_handles_single_model():
+    usage = {"claude-opus-4-7": {"inputTokens": 100, "outputTokens": 500}}
+    assert _pick_answering_model(usage) == "claude-opus-4-7"
+
+
+def test_pick_answering_model_returns_none_for_empty():
+    assert _pick_answering_model({}) is None
+    assert _pick_answering_model(None) is None
 
 
 # ─────────────────────────────────────────────────────────────────────────

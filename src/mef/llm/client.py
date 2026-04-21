@@ -176,7 +176,7 @@ def call_claude(
         )
 
     result_text = (envelope.get("result") or "").strip()
-    model_used = next(iter(envelope.get("modelUsage") or {}), None)
+    model_used = _pick_answering_model(envelope.get("modelUsage") or {})
     usage = envelope.get("usage") or {}
 
     return LLMResponse(
@@ -189,6 +189,35 @@ def call_claude(
         token_output=usage.get("output_tokens"),
         model_name=model_used,
     )
+
+
+def _pick_answering_model(model_usage: dict) -> Optional[str]:
+    """Pick the model that actually produced the response from the CLI's
+    ``modelUsage`` dict.
+
+    The Claude CLI frequently reports usage for more than one model in a
+    single invocation — e.g. a small helper model for argument parsing
+    / intake, and the requested model for the actual inference. Picking
+    the first dict key mis-attributes the call to whichever model the
+    CLI happened to run first (often the helper). We pick the model
+    with the most output tokens instead: the intake helper produces a
+    tiny response (~20 tokens) while the answering model produces the
+    real body, so output_tokens is a reliable discriminator.
+    """
+    if not model_usage:
+        return None
+
+    def _output_tokens(entry: dict) -> int:
+        v = entry.get("outputTokens") or entry.get("output_tokens") or 0
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+
+    return max(
+        model_usage.items(),
+        key=lambda kv: _output_tokens(kv[1] or {}),
+    )[0]
 
 
 # ─────────────────────────────────────────────────────────────────────────
