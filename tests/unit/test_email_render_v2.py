@@ -45,6 +45,21 @@ def test_idea_includes_risk_reward_block():
     assert "R:R 2.50:1" in email.body
 
 
+def test_idea_surfaces_rec_uid_for_cli_show():
+    # The closing CLI hint tells the user to run `mef show <rec-id>`, so
+    # every idea block needs to print its rec_uid somewhere the user can
+    # copy. Guards against a regression where the hint was present but
+    # the ids were nowhere in the body.
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-1", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(rec_uid="R-000042")],
+    )
+    assert "R-000042" in email.body
+    assert "Rec ID:" in email.body
+
+
 def test_not_reviewed_footer_when_gate_unavailable_wholesale():
     email = render_daily_email(
         when_kind="premarket", intent="today_after_10am",

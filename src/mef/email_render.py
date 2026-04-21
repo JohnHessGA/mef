@@ -84,6 +84,13 @@ def _idea_lines(idx: int, idea: dict[str, Any]) -> list[str]:
             pass
     lines = [header]
 
+    # Surface the recommendation UID so the closing CLI hint
+    # (`mef show <rec-id>`) is actionable. Previously the email told
+    # the user to run `mef show <rec-id>` without ever printing an id.
+    rec_uid = idea.get("rec_uid")
+    if rec_uid:
+        lines.append(f"     Rec ID:     {rec_uid}")
+
     entry_zone = idea.get("entry_zone")
     if entry_zone:
         if idea.get("needs_pullback"):
