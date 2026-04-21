@@ -149,6 +149,60 @@ def test_review_footer_count_fallback_when_ideas_not_passed():
     assert "3 held for review" in email.body
 
 
+def test_per_engine_top_renders_side_by_side_section():
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-ENG1", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea()],
+        per_engine_top={
+            "trend": [
+                {"symbol": "JCI", "conviction_score": 0.89, "posture": "bullish"},
+            ],
+            "mean_reversion": [
+                {"symbol": "PSX", "conviction_score": 0.65, "posture": "oversold_bouncing"},
+            ],
+            "value": [
+                {"symbol": "TGT", "conviction_score": 0.71, "posture": "value_quality"},
+            ],
+        },
+    )
+    body = email.body
+    assert "Engine views" in body
+    assert "Trend top 1" in body and "JCI" in body
+    assert "Mean-rev top 1" in body and "PSX" in body
+    assert "Value top 1" in body and "TGT" in body
+
+
+def test_synthesis_reorders_new_ideas():
+    # Three approved picks. LLM synthesis prefers TGT over JCI over PSX.
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-SYN1", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[
+            _idea(symbol="JCI"),
+            _idea(symbol="PSX"),
+            _idea(symbol="TGT"),
+        ],
+        synthesis_order=["TGT", "JCI", "PSX"],
+    )
+    body = email.body
+    # TGT appears before JCI appears before PSX.
+    assert body.index("TGT") < body.index("JCI") < body.index("PSX")
+
+
+def test_engine_badge_renders_lineage():
+    # Multi-engine pick gets a combined badge.
+    email = render_daily_email(
+        when_kind="premarket", intent="today_after_10am",
+        run_uid="DR-BADGE", started_at=_time(),
+        stocks_in_universe=305, etfs_in_universe=15,
+        new_ideas=[_idea(source_engines=["trend", "value"])],
+    )
+    assert "[engines: trend+value]" in email.body
+
+
 def test_earnings_annotation_on_idea_line():
     from datetime import date as _date, timedelta as _td
     email = render_daily_email(

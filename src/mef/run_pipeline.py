@@ -355,6 +355,9 @@ def _insert_recommendations(
                 "needs_pullback":    cand.needs_pullback,
                 "current_price":     cand.features.get("close"),
                 "next_earnings_date": cand.features.get("next_earnings_date"),
+                "source_engines":    sorted(
+                    engine_scores.get(cand.symbol, {cand.engine: 0}).keys()
+                ) if engine_scores else [cand.engine],
                 **pnl,
             })
     conn.commit()
@@ -694,6 +697,21 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
             # visible so the user can decide whether to act manually.
             email_ideas = [r for r in emitted_rows if r.get("should_email")]
             review_ideas = [r for r in emitted_rows if r.get("llm_gate") == "review"]
+            # Per-engine top-N rendered for the side-by-side email
+            # section. Already computed upstream; just reformat into
+            # the email-friendly dict shape.
+            per_engine_top_for_email: dict[str, list[dict[str, Any]]] = {
+                eng: [
+                    {
+                        "symbol":           c.symbol,
+                        "conviction_score": c.conviction_score,
+                        "posture":          c.posture,
+                    }
+                    for c in cands
+                ]
+                for eng, cands in per_engine.items()
+            }
+
             email = render_daily_email(
                 when_kind=when_kind,
                 intent=_INTENT[when_kind],
@@ -708,6 +726,8 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 llm_gate_rejected=len(gate.rejected),
                 staleness_warning=(freshness.message if freshness.should_warn else None),
                 upcoming_macro_events=evidence.baseline.get("upcoming_high_impact_events"),
+                per_engine_top=per_engine_top_for_email,
+                synthesis_order=gate.synthesis,
             )
 
             if dry_run:

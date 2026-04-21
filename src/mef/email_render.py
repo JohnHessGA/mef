@@ -41,11 +41,31 @@ def _fmt_ratio(v: float | None) -> str:
     return f"{v:.2f}:1" if v is not None else "n/a"
 
 
+_ENGINE_LABELS = {
+    "trend":          "trend",
+    "mean_reversion": "mean-rev",
+    "value":          "value",
+}
+
+
+def _engine_badge(source_engines: list[str] | None) -> str:
+    """Format an engine-lineage badge. Multi-engine picks get
+    trend+value-style joined labels; single-engine gets the bare name.
+    """
+    if not source_engines:
+        return ""
+    labels = [_ENGINE_LABELS.get(e, e) for e in source_engines]
+    if len(labels) == 1:
+        return f"  [engine: {labels[0]}]"
+    return f"  [engines: {'+'.join(labels)}]"
+
+
 def _idea_lines(idx: int, idea: dict[str, Any]) -> list[str]:
     symbol = idea.get("symbol", "?")
     posture = idea.get("posture", "?")
     expression = idea.get("expression", "?")
-    header = f"  {idx}. {symbol} — {posture} — {expression}"
+    badge = _engine_badge(idea.get("source_engines"))
+    header = f"  {idx}. {symbol} — {posture} — {expression}{badge}"
     # Earnings annotation on the symbol line when an announcement is
     # within the caution horizon (≤21 days). Informational only — the
     # ranker already vetoed or penalized per its own thresholds, so by
@@ -119,11 +139,28 @@ def render_daily_email(
     staleness_warning: str | None = None,
     staleness_aborted: bool = False,
     upcoming_macro_events: list[dict[str, Any]] | None = None,
+    per_engine_top: dict[str, list[dict[str, Any]]] | None = None,
+    synthesis_order: list[str] | None = None,
 ) -> RenderedEmail:
     new_ideas = new_ideas or []
     review_ideas = review_ideas or []
     active_updates = active_updates or []
     upcoming_macro_events = upcoming_macro_events or []
+    per_engine_top = per_engine_top or {}
+    synthesis_order = synthesis_order or []
+
+    # Reorder new_ideas by the LLM's synthesis if available. The
+    # synthesis is the LLM's ordered top picks across all engines —
+    # treat it as the actionable ordering for the email. Items the LLM
+    # approved but didn't include in synthesis fall to the bottom,
+    # preserving conviction order among themselves.
+    if synthesis_order and new_ideas:
+        order_index = {sym: i for i, sym in enumerate(synthesis_order)}
+        big = len(synthesis_order) + 1
+        new_ideas = sorted(
+            new_ideas,
+            key=lambda idea: order_index.get(idea.get("symbol", ""), big),
+        )
 
     subject_prefix = _SUBJECT_PREFIX.get(when_kind, "MEF report")
     date_label = started_at.strftime("%Y-%m-%d")
@@ -200,6 +237,26 @@ def render_daily_email(
         lines.append("")
         lines.append(f"  Also from this run: {', '.join(held_parts)} (logged for audit).")
     lines.append("")
+
+    # Per-engine top-N sections — the raw output of each ranker engine,
+    # rendered concisely (one line per pick) so the user can see what
+    # each engine surfaced before the LLM's synthesis narrowed it. Order
+    # is fixed: trend → mean-reversion → value.
+    if per_engine_top:
+        lines.append("Engine views (raw per-engine top picks):")
+        _engine_order = ("trend", "mean_reversion", "value")
+        for eng in _engine_order:
+            items = per_engine_top.get(eng) or []
+            if not items:
+                continue
+            label = _ENGINE_LABELS.get(eng, eng).capitalize()
+            lines.append(f"  {label} top {len(items)}:")
+            for i, it in enumerate(items, start=1):
+                sym = it.get("symbol", "?")
+                conv = it.get("conviction_score", 0.0) or 0.0
+                posture = it.get("posture", "?")
+                lines.append(f"    {i}. {sym:<6} conv={conv:.2f}  {posture}")
+        lines.append("")
 
     lines.append(f"Active recommendations & tracked positions ({len(active_updates)}):")
     if not active_updates:
