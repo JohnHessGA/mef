@@ -82,20 +82,27 @@ def run(args) -> int:
         print("No recommendations matched.")
         return 0
 
-    print(f"{'glyph':<5} {'uid':<11} {'symbol':<6} {'state':<15} "
+    print(f"{'glyph':<5} {'uid':<11} {'symbol':<7} {'state':<15} "
           f"{'posture':<16} {'expression':<18} "
           f"{'stop':>10} {'target':>10} {'conv':>5}")
-    print("─" * 107)
+    print("─" * 108)
+    any_etf = False
     for r in rows:
         glyph = _STATE_GLYPH.get(r["state"], "?")
         stop = f"${r['stop_level']:,.2f}" if r['stop_level'] is not None else "-"
         target = f"${r['target_level']:,.2f}" if r['target_level'] is not None else "-"
         conv = f"{r['confidence']:.2f}" if r['confidence'] is not None else "-"
+        is_etf = r.get("asset_kind") == "etf"
+        symbol = f"{r['symbol']}*" if is_etf else r["symbol"]
+        if is_etf:
+            any_etf = True
         print(
-            f"{glyph:<5} {r['uid']:<11} {r['symbol']:<6} {r['state']:<15} "
+            f"{glyph:<5} {r['uid']:<11} {symbol:<7} {r['state']:<15} "
             f"{r['posture']:<16} {r['expression']:<18} "
             f"{stop:>10} {target:>10} {conv:>5}"
         )
     print()
     print(f"{len(rows)} recommendation(s).")
+    if any_etf:
+        print("* this is an ETF")
     return 0
