@@ -38,9 +38,11 @@ SELECT engine,
 | `mef.paper_score`                  | `rec_uid` (UNIQUE)        | `mef score` (auto on each daily run)               | What would have happened to every emitted rec if you'd bought at run-day close?  |
 | `mef.recommendation_pnl_daily`     | `(rec_uid, as_of_date)`   | `snapshot_daily_pnl()` in the daily pipeline       | What was the day-by-day P&L curve over the holding period?                       |
 
-All four use **idempotent writes** (UNIQUE keys + `ON CONFLICT DO
-UPDATE` where applicable) and skip rows that already exist. Re-running
-`mef score` or `mef run` on the same day is safe.
+All four are **rebuild-safe** (UNIQUE keys + `ON CONFLICT DO UPDATE`
+where applicable) and skip rows that already exist. Re-running `mef
+score` or `mef run` on the same day produces the same derived rows
+with no duplicates or drift. (Rows are not sacred; the entire MEFDB
+table set is rebuildable from the universe + SHDB.)
 
 ---
 
@@ -154,7 +156,7 @@ Price source priority:
 3. **Skip** — surfaced in the run summary's `pnl_snapshot` event so
    you know coverage is incomplete.
 
-Idempotent via `ON CONFLICT (rec_uid, as_of_date) DO UPDATE`.
+Rebuild-safe via `ON CONFLICT (rec_uid, as_of_date) DO UPDATE` — re-running snapshots the same date deterministically.
 
 Source: `src/mef/pnl_tracking.py`.
 

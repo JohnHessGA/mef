@@ -264,7 +264,7 @@ mef link-trade R-000032 \
 
 Sell fields are optional — link the buy when you fill it; come back
 with the sell when you exit. Re-running the command on the same
-`rec_uid` overwrites the prior values (idempotent).
+`rec_uid` overwrites the prior values (rebuild-safe).
 
 The headline metric this populates is **`realized_pnl_per_day`**:
 

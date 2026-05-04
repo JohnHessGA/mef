@@ -391,7 +391,7 @@ below-current entry zone as a risk_shape issue.
 | `proposed` | `dismissed` | `mef dismiss <rec-id>` |
 | `active` | `closed_win` / `closed_loss` / `closed_timeout` | See §8 |
 
-Transitions are computed at **every run** (and also at every `mef import-positions`). The state machine is idempotent — running twice produces the same state.
+Transitions are computed at **every run** (and also at every `mef import-positions`). The state machine is deterministic — running twice over the same inputs produces the same state.
 
 ### 7.3 Active-position inference rules
 
@@ -1014,7 +1014,7 @@ universe:
 Pure-logic tests first:
 
 - Ranker: given a fixed feature set, expected posture and score
-- Lifecycle: every valid state transition, idempotency of re-runs
+- Lifecycle: every valid state transition, rebuild-safety of re-runs
 - Active-position inference: varying overlap of holdings and proposed entries
 - Scoring: win/loss/timeout classification and estimated-P&L math
 - Email rendering: new-ideas list empty / single / many; active-position formatting
@@ -1022,7 +1022,7 @@ Pure-logic tests first:
 
 DB-backed tests against a scratch MEFDB:
 
-- Universe load idempotency
+- Universe load rebuild-safety (re-loading from notes/ produces same rows)
 - Full-pipeline smoke test with a tiny stub SHDB dataset
 - Lock behavior (two concurrent runs contending)
 
