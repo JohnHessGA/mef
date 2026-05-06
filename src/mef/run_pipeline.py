@@ -29,6 +29,7 @@ from typing import Any
 from mef.config import load_app_config
 from mef.db.connection import connect_mefdb
 from mef.email_render import render_daily_email
+from mef.etf_classifier import classify_universe as _classify_etf_universe
 from mef.email_send import send_daily_email
 from mef.evidence import EvidenceBundle, FreshnessReport, check_freshness, pull_latest_evidence
 from mef.lifecycle import sweep as lifecycle_sweep
@@ -784,6 +785,15 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 for eng, cands in per_engine.items()
             }
 
+            etf_rows = {
+                sym: row for sym, row in evidence.symbols.items()
+                if row.get("asset_kind") == "etf"
+            }
+            etf_entries = [
+                {"symbol": e.symbol, "label": e.label, "reason": e.reason}
+                for e in _classify_etf_universe(etf_rows)
+            ]
+
             email = render_daily_email(
                 when_kind=when_kind,
                 intent=_INTENT[when_kind],
@@ -800,6 +810,7 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 staleness_warning=(freshness.message if freshness.should_warn else None),
                 upcoming_macro_events=evidence.baseline.get("upcoming_high_impact_events"),
                 per_engine_top=per_engine_top_for_email,
+                etf_entries=etf_entries,
             )
 
             if dry_run:

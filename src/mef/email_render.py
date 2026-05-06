@@ -410,12 +410,14 @@ def render_daily_email(
     staleness_aborted: bool = False,
     upcoming_macro_events: list[dict[str, Any]] | None = None,
     per_engine_top: dict[str, list[dict[str, Any]]] | None = None,
+    etf_entries: list[dict[str, Any]] | None = None,
 ) -> RenderedEmail:
     new_ideas = new_ideas or []
     review_ideas = review_ideas or []
     active_updates = active_updates or []
     upcoming_macro_events = upcoming_macro_events or []
     per_engine_top = per_engine_top or {}
+    etf_entries = etf_entries or []
 
     subject_prefix = _SUBJECT_PREFIX.get(when_kind, "MEF report")
     date_label = started_at.strftime("%Y-%m-%d")
@@ -520,6 +522,32 @@ def render_daily_email(
                 conv = it.get("conviction_score", 0.0) or 0.0
                 posture = it.get("posture", "?")
                 lines.append(f"    {i}. {sym:<6} conv={conv:.2f}  {posture}")
+        lines.append("")
+
+    if etf_entries:
+        lines.append(f"ETF entry conditions ({len(etf_entries)}):")
+        lines.append("  Reporting layer — does not change stock recommendations.")
+        # Group by label so the most actionable categories surface first.
+        _label_order = (
+            "reasonable_entry",
+            "healthy_pullback",
+            "near_entry",
+            "extended_wait",
+            "breakdown_risk",
+            "neutral",
+        )
+        by_label: dict[str, list[dict[str, Any]]] = {lbl: [] for lbl in _label_order}
+        for e in etf_entries:
+            by_label.setdefault(e.get("label", "neutral"), []).append(e)
+        for lbl in _label_order:
+            items = by_label.get(lbl) or []
+            if not items:
+                continue
+            lines.append(f"  [{lbl}] ({len(items)}):")
+            for e in items:
+                sym = e.get("symbol", "?")
+                reason = e.get("reason", "")
+                lines.append(f"    {sym:<6} — {reason}")
         lines.append("")
 
     lines.append(f"Active recommendations & tracked positions ({len(active_updates)}):")

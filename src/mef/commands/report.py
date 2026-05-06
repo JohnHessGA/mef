@@ -19,6 +19,8 @@ from typing import Any
 
 from mef.db.connection import connect_mefdb
 from mef.email_render import render_daily_email
+from mef.etf_classifier import classify_universe as _classify_etf_universe
+from mef.evidence import pull_latest_evidence
 
 
 _RUN_BY_UID = """
@@ -178,6 +180,27 @@ def run(args) -> int:
     except Exception:
         pass  # report command is read-only; silently skip banner on any issue
 
+    # ETF entry-condition labels are an as-of-now reading; recomputed on
+    # the fly from current mart data rather than persisted with the run.
+    # That means a re-rendered historical report shows today's ETF reads,
+    # not the run's. Acceptable for v1 since the labels are time-sensitive
+    # and the operational use is "what does this look like right now."
+    etf_entries: list[dict[str, Any]] = []
+    try:
+        evidence = pull_latest_evidence()
+        etf_rows = {
+            sym: row for sym, row in evidence.symbols.items()
+            if row.get("asset_kind") == "etf"
+        }
+        etf_entries = [
+            {"symbol": e.symbol, "label": e.label, "reason": e.reason}
+            for e in _classify_etf_universe(etf_rows)
+        ]
+    except Exception:
+        # Report command is read-only / best-effort; an SHDB hiccup
+        # should not block report rendering.
+        pass
+
     email = render_daily_email(
         when_kind=run_when,
         intent=intent,
@@ -191,6 +214,7 @@ def run(args) -> int:
         llm_gate_available=("unavailable" not in gate_counts or len(gate_counts) > 1),
         llm_gate_rejected=gate_counts.get("reject", 0),
         upcoming_macro_events=upcoming_events,
+        etf_entries=etf_entries,
     )
 
     print(f"Subject: {email.subject}")
