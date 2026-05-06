@@ -22,7 +22,7 @@ This file is the high-level build spec — what MEF is, why it exists, and the v
 
 ## Purpose
 
-MEF is a **daily forecasting and recommendation tool** over a fixed, curated universe of **305 US stocks and 15 core US ETFs** (320 symbols total). It looks at that focused pool every trading day, weighs a mix of evidence, and returns a small number of high-conviction ideas — each with a practical entry plan and an exit/invalidation plan — or explicitly says *no new trades today*.
+MEF is a **daily forecasting and recommendation tool** over a fixed, curated universe of **305 US stocks and 20 core US ETFs** (325 symbols total). It looks at that focused pool every trading day, weighs a mix of evidence, and returns a small number of high-conviction ideas — each with a practical entry plan and an exit/invalidation plan — or explicitly says *no new trades today*.
 
 MEF also tracks the user's real holdings and every recommendation MEF has ever made, updating their status each run until they are filled, dismissed, expired, or closed. Each closed recommendation is scored win / loss / timeout with an estimated P&L for 100 shares.
 
@@ -64,7 +64,7 @@ The tool is built to ship fast, run every day, and improve from its own scoring 
 
 ### In scope (v1)
 
-- Fixed universe: 305 US stocks + 15 core US ETFs (see `notes/focus-universe-us-stocks-final.md`, `notes/core-us-etfs-daily-final.md`)
+- Fixed universe: 305 US stocks + 20 core US ETFs (see `notes/focus-universe-us-stocks-final.md`, `notes/core-us-etfs-daily-final.md`)
 - **Two scheduled runs per trading day:**
   - **Pre-market run** — recommendations intended to be traded **today after ~10:00 AM ET**
   - **Post-market run** — recommendations for the **next trading day**
@@ -73,7 +73,7 @@ The tool is built to ship fast, run every day, and improve from its own scoring 
   - momentum / trend / relative strength
   - volatility behavior
   - options open interest context (where available)
-  - benchmark-relative movement (SPY + sector ETFs from the 15-ETF list)
+  - benchmark-relative movement (SPY + sector ETFs from the 20-ETF list)
   - earnings proximity and documented calendar events (as available in SHDB)
 - Directional posture per candidate: `bullish` / `bearish_caution` / `range_bound` / `no_edge` (plus `oversold_bouncing` from mean-reversion and `value_quality` from the value engine)
 - **Layered gating** (as of 2026-04-21) — see `mef_layered_gating.md` for the canonical spec:
@@ -165,7 +165,7 @@ Full quick reference + day-to-day usage lives in **`mef_operations.md`**. Highli
 | `mef gate-audit` | Side-by-side outcome distribution of approve / review / reject / unavailable |
 | `mef score` | Re-evaluate closed recs and refresh paper + shadow scoring |
 | `mef import-positions <csv>` | Ingest a Fidelity Portfolio Positions CSV |
-| `mef universe [load]` | Show or reload the 305+15 universe |
+| `mef universe [load]` | Show or reload the 305+20 universe |
 | `mef report --when {premarket\|postmarket} [--run UID]` | Regenerate the email body for a run from existing DB state, no SMTP |
 | `mef init-db` | Apply MEFDB + Overwatch migrations (idempotent) |
 
@@ -354,7 +354,7 @@ Full email templates and formatting decisions live in the design spec / implemen
 
 ## Hard Boundaries
 
-1. **Fixed 305+15 universe.** No broad-market screening.
+1. **Fixed 305+20 universe.** No broad-market screening.
 2. **No DAS dependency in v1.** MEF reads SHDB directly.
 3. **No RSE dependency in v1.** Revisit once RSDB has useful outputs.
 4. **No backtesting.** Historical strategy simulation belongs elsewhere (same line RSE draws).
@@ -367,7 +367,7 @@ Full email templates and formatting decisions live in the design spec / implemen
 
 ## Why the Universe Matters
 
-The curated 305+15 is load-bearing. A fixed, thoughtful universe:
+The curated 305+20 is load-bearing. A fixed, thoughtful universe:
 
 - keeps scoring comparable over time (same tradable set every day)
 - eliminates cold-start problems for new symbols

@@ -136,7 +136,7 @@ Most-frequent first.
 | `mef score`                              | Force-refresh scoring + paper + shadow scores (cron does this automatically)                    |
 | `mef import-positions <fidelity.csv>`    | Ingest a Fidelity Portfolio Positions CSV (auto-activates matching `proposed` recs)             |
 | `mef run --when premarket --dry-run`     | Run the full pipeline but skip sending the email — preview tomorrow's email tonight             |
-| `mef universe [load]`                    | Show or reload the 305+15 universe from the `notes/` files                                      |
+| `mef universe [load]`                    | Show or reload the 305+20 universe from the `notes/` files                                      |
 | `mef init-db`                            | Apply MEFDB + Overwatch migrations (idempotent; safe to re-run)                                 |
 
 `mef --help` is authoritative if any command drifts from this table.

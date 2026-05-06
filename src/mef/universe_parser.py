@@ -164,7 +164,7 @@ _BULLET_RE = re.compile(r"^\s*[-*]\s+\*\*([A-Z.]+)\*\*\s+[—–-]\s+(.+?)\s*$")
 
 
 def parse_etfs(text: str) -> list[dict[str, Any]]:
-    """Extract ETF rows from the 15-ETF notes file.
+    """Extract ETF rows from the 20-ETF notes file.
 
     The file is organised as ``### Section`` headings followed by bullet
     lines ``- **SYM** — description``. The current section determines the

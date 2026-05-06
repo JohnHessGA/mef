@@ -1,6 +1,6 @@
-# Core US ETFs — Daily Tradable Shortlist (15 Symbols)
+# Core US ETFs — Daily Tradable Shortlist (20 Symbols)
 
-Version: 2026-04-19
+Version: 2026-05-05 (expanded from 15 → 20: added VUG, SCHG, SPYG, QUAL under Style/Factor; ONEQ under Broad Market)
 
 This is a daily-use set of core US ETF list. It is designed for a forecasting tool that values **tradability, liquidity, and clear role definition** over maximum coverage.
 
@@ -19,23 +19,28 @@ Keep a **small, highly tradable ETF set** that still covers:
 - one high-liquidity industry ETF
 - one defensive sector for risk-off periods
 
-## Daily Shortlist (15)
+## Daily Shortlist (20)
 
-### Broad Market (3)
+### Broad Market (4)
 
 - **SPY** — S&P 500 benchmark; primary broad-market reference
 - **QQQ** — large-cap growth / Nasdaq leadership
 - **VTI** — total market exposure
+- **ONEQ** — Nasdaq Composite (broader Nasdaq read than QQQ)
 
 ### Size (1)
 
 - **IWM** — small-cap risk appetite / cyclicality read
 
-### Style / Factor (3)
+### Style / Factor (7)
 
 - **IWD** — large-cap value
 - **IWF** — large-cap growth
 - **SCHD** — dividend / quality-income tilt
+- **VUG** — Vanguard large-cap growth
+- **SCHG** — Schwab large-cap growth
+- **SPYG** — SPDR S&P 500 growth
+- **QUAL** — MSCI USA quality factor
 
 ### Core Sector ETFs (7)
 
@@ -51,7 +56,7 @@ Keep a **small, highly tradable ETF set** that still covers:
 
 - **SMH** — semiconductors; high-importance industry group with strong trading relevance
 
-## Why these 15 made the cut
+## Why these 20 made the cut
 
 These ETFs were favored because they are generally among the most practical instruments for a daily recommendation engine:
 
@@ -63,6 +68,8 @@ These ETFs were favored because they are generally among the most practical inst
 
 ## ## Recommended use
 
-Use these 15 as the **daily scoring universe** for ETFs.
+Use these 20 as the **daily scoring universe** for ETFs.
+
+Note: VUG / SCHG / SPYG / IWF heavily overlap as large-cap growth proxies; the ranker does not dedupe correlated ETFs, so on growth-led days expect multiple correlated emissions.
 
 

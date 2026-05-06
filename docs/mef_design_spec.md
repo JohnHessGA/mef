@@ -112,7 +112,7 @@ Same file the user already downloads for IRA Guard. MEF accepts an arbitrary pat
 
 ### 4.3 Benchmarks
 
-`SPY` + the seven sector ETFs (XLK/XLF/XLV/XLE/XLI/XLY/XLP) are already in the 15-ETF universe. All benchmark series are **joined from SHDB at read time**. If this causes a measurable slowdown, we cache a narrow `mef.benchmark_snapshot` daily; do not build the cache up front.
+`SPY` + the seven sector ETFs (XLK/XLF/XLV/XLE/XLI/XLY/XLP) are already in the 20-ETF universe. All benchmark series are **joined from SHDB at read time**. If this causes a measurable slowdown, we cache a narrow `mef.benchmark_snapshot` daily; do not build the cache up front.
 
 ---
 
@@ -718,7 +718,7 @@ Add targeted indexes only as query patterns surface. Do not pre-index.
 
 ## 12. Performance & Concurrency
 
-- Symbol-level work in the daily run (evidence pull, feature compute) is **parallelized** with a small pool. The universe is 320 symbols; a sequential pass is acceptable for v1 but parallelization is the first optimization if a run is too slow.
+- Symbol-level work in the daily run (evidence pull, feature compute) is **parallelized** with a small pool. The universe is 325 symbols; a sequential pass is acceptable for v1 but parallelization is the first optimization if a run is too slow.
 - Only one run at a time — enforced by a PID file + `ow.mef_lock` row (same dual-lock pattern as MDC / UDC / IRA Guard). A stale lock is auto-cleared when the owning PID is dead.
 - LLM calls are the slowest step. Start with a single batch LLM call over all survivors; split only if latency becomes a problem.
 
@@ -1063,7 +1063,7 @@ Nothing in this list blocks the build; each resolves at the natural point in the
 The smallest thing worth calling v1:
 
 1. `mef status` returns.
-2. `mef universe load` populates the 305+15.
+2. `mef universe load` populates the 305+20.
 3. `mef import-positions` ingests a real Fidelity CSV.
 4. `mef run --when postmarket` runs end-to-end against SHDB with a crude ranker, produces zero-or-more recommendations, logs an LLM trace, and sends a real email.
 5. `mef dismiss <rec-id>` works. Expiration and auto-activation work on the next run.

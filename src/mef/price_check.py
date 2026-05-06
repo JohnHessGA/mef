@@ -7,7 +7,7 @@ entry zones, stops, or targets. The email surfaces a short note when
 the move is meaningful; otherwise the annotation is silent.
 
 Scope:
-  - runs on 5–10 emitted ideas per run, not the full 305+15 universe
+  - runs on 5–10 emitted ideas per run, not the full 305+20 universe
   - single network call, fail-silent — a yfinance hiccup never
     blocks the email or the run
   - session-aware tagging: "regular" / "pre" / "post" / "closed"

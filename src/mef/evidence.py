@@ -36,7 +36,7 @@ SECTOR_TO_ETF = {
     "Industrials":            "XLI",
     "Consumer Cyclical":      "XLY",
     "Consumer Defensive":     "XLP",
-    # No mapped sector ETF in our 15-ETF universe for:
+    # No mapped sector ETF in our 20-ETF universe for:
     #   Communication Services, Utilities, Real Estate, Basic Materials.
     # Stocks in those sectors fall through — no sector-relative score.
 }

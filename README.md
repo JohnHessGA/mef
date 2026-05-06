@@ -1,7 +1,7 @@
 # MEF — Muse Engine Forecaster
 
 Daily forecasting and recommendation tool over a curated universe of
-**305 US stocks + 15 core US ETFs**. Advisory only — never trades.
+**305 US stocks + 20 core US ETFs**. Advisory only — never trades.
 
 - **Build spec:** [`docs/README_mef.md`](docs/README_mef.md)
 - **Design spec:** [`docs/mef_design_spec.md`](docs/mef_design_spec.md)

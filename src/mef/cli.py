@@ -5,7 +5,7 @@ Subcommands (target set per docs/README_mef.md §"User Experience / CLI"):
 - mef run --when {premarket|postmarket} — scheduled daily run
 - mef status                            — environment & data-source overview
 - mef init-db                           — apply MEFDB migrations
-- mef universe [load]                   — show or reload the 305+15 universe
+- mef universe [load]                   — show or reload the 305+20 universe
 - mef recommendations [...]             — list recommendations by state
 - mef show <rec-id>                     — detail on a recommendation
 - mef dismiss <rec-id>                  — mark a proposed rec as not-implemented
@@ -51,7 +51,7 @@ def _add_init_db(sub: argparse._SubParsersAction) -> None:
 
 
 def _add_universe(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("universe", help="Show or reload the 305+15 universe.")
+    p = sub.add_parser("universe", help="Show or reload the 305+20 universe.")
     p.add_argument(
         "action",
         nargs="?",

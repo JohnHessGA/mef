@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS mef.universe_stock (
     last_refreshed_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- universe_etf — the 15 core ETFs
+-- universe_etf — the 20 core ETFs
 CREATE TABLE IF NOT EXISTS mef.universe_etf (
     symbol              TEXT PRIMARY KEY,
     role                TEXT NOT NULL,    -- broad_market | size | style_value | style_growth | sector_* | industry_*

@@ -12,7 +12,7 @@ Source: `src/mef/price_check.py`.
 ## When it runs
 
 After the LLM gate, before email rendering, on the ~5–10 emitted ideas
-only. Does not touch the 305+15 universe or the engine scorers.
+only. Does not touch the 305+20 universe or the engine scorers.
 
 Runs in the normal daily-run path. Skipped in the stale-data abort
 path (no ideas to check).

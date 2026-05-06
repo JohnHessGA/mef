@@ -158,11 +158,12 @@ def test_parse_etfs_real_file_counts():
     repo_root = Path(__file__).resolve().parents[2]
     notes = (repo_root / "notes" / "core-us-etfs-daily-final.md").read_text()
     rows = parse_etfs(notes)
-    assert len(rows) == 15
+    assert len(rows) == 20
     symbols = {r["symbol"] for r in rows}
-    # Spot-check: these are all in the 15-ETF shortlist.
+    # Spot-check: these are all in the 20-ETF shortlist.
     assert {"SPY", "QQQ", "VTI", "IWM", "XLK", "XLF", "XLV",
-            "XLE", "XLI", "XLY", "XLP", "SMH"}.issubset(symbols)
+            "XLE", "XLI", "XLY", "XLP", "SMH",
+            "VUG", "SCHG", "SPYG", "QUAL", "ONEQ"}.issubset(symbols)
 
 
 def test_parse_etfs_empty_raises():

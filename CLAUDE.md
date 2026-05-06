@@ -27,7 +27,7 @@ The spec is the source of truth. Read the relevant section before implementing; 
 
 These are load-bearing. Stop and ask before crossing any of them.
 
-1. **Fixed 305+15 universe.** No broad-market screening, no dynamic universe expansion in v1.
+1. **Fixed 305+20 universe.** No broad-market screening, no dynamic universe expansion in v1. (Operator-curated bumps to the notes files — like the 2026-05-05 15→20 ETF expansion adding VUG/SCHG/SPYG/QUAL/ONEQ — are allowed; automated/screen-driven expansion is not.)
 2. **No DAS dependency.** DAS does not yet exist; MEF reads SHDB directly. Revisit when DAS is real.
 3. **No RSE dependency in v1.** Revisit once RSDB has useful outputs.
 4. **No backtesting.** Historical strategy simulation belongs elsewhere (same boundary RSE enforces).

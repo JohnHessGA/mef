@@ -1,4 +1,4 @@
-"""`mef universe` — show or reload the 305-stock + 15-ETF universe.
+"""`mef universe` — show or reload the 305-stock + 20-ETF universe.
 
 Subcommands (dispatched via the ``action`` positional argument):
 
