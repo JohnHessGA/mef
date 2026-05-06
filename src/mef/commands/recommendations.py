@@ -82,10 +82,10 @@ def run(args) -> int:
         print("No recommendations matched.")
         return 0
 
-    print(f"{'glyph':<5} {'uid':<11} {'symbol':<7} {'state':<15} "
+    print(f"{'glyph':<5} {'uid':<11} {'symbol':<7} {'state':<21} "
           f"{'posture':<16} {'expression':<18} "
           f"{'stop':>10} {'target':>10} {'conv':>5}")
-    print("─" * 108)
+    print("─" * 114)
     any_etf = False
     for r in rows:
         glyph = _STATE_GLYPH.get(r["state"], "?")
@@ -96,8 +96,10 @@ def run(args) -> int:
         symbol = f"{r['symbol']}*" if is_etf else r["symbol"]
         if is_etf:
             any_etf = True
+        state_ts = r.get("state_changed_at") or r.get("created_at")
+        state_label = f"{r['state']} {state_ts.strftime('%m/%d')}" if state_ts else r["state"]
         print(
-            f"{glyph:<5} {r['uid']:<11} {symbol:<7} {r['state']:<15} "
+            f"{glyph:<5} {r['uid']:<11} {symbol:<7} {state_label:<21} "
             f"{r['posture']:<16} {r['expression']:<18} "
             f"{stop:>10} {target:>10} {conv:>5}"
         )
