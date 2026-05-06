@@ -530,7 +530,7 @@ Holds the 305 stocks. Loaded from `notes/focus-universe-us-stocks-final.md` by `
 
 ### `mef.universe_etf`
 
-The 15 ETFs.
+The 20 ETFs.
 
 - `symbol` (PK)
 - `role` (e.g., `broad_market`, `size`, `style_value`, `style_growth`, `sector_tech`, `industry_semis`, …)
@@ -737,7 +737,7 @@ Header
   Run: DR-…, pre-market, completed HH:MM ET
   Date: YYYY-MM-DD
   Intent: trades for today (after 10:00 ET)
-  Universe: 305 stocks, 15 ETFs
+  Universe: 305 stocks, 20 ETFs
 
 📅 Upcoming high-impact US macro events:   ← rendered only when bundle
    - 2026-04-29  Fed Interest Rate Decision   has events in 0-3 day horizon

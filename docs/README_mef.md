@@ -52,7 +52,7 @@ The tool is built to ship fast, run every day, and improve from its own scoring 
 ## Design Attitude
 
 - **Lightweight vs. DAS.** Prefer the smallest schema and thinnest evidence stack that still produces useful output. Add complexity only after we've run it daily for a while.
-- **Fixed universe.** 305 stocks + 15 ETFs. No dynamic universe expansion in the near future.
+- **Fixed universe.** 305 stocks + 20 ETFs. No dynamic universe expansion in the near future.
 - **SHDB-only data in v1.** No DAS inputs (DAS isn't built). No RSE inputs yet either (RSE is still standing up). Both are candidates for later versions.
 - **Deterministic-first, LLM-reviewed.** Three independent deterministic engines — **trend** (continuation/breakout), **mean-reversion** (oversold bounce), and **value** (cheap + durable) — each produce their own top-N candidates. Claude CLI (Opus 4.7, as of 2026-04-21) reviews the dedup'd union as a conservative gate, judging each candidate independently (approve / review / reject) with structured rationale (summary, strengths, concerns, key judgment). The LLM adds context and color; it does not replace the engines and does not produce cross-candidate ordering.
 - **"No new trades today" is valid output.** Expected and healthy on weak-evidence days.
@@ -210,7 +210,7 @@ Each run executes the same pipeline; only the intent (today-after-10 vs. next-tr
  1. Open mef.daily_run (status=running) + ow.mef_run telemetry row
  2. Lifecycle sweep — expire/auto-close any recs that aged out or
     disappeared from the latest position snapshot
- 3. Load universe (305 + 15 from MEFDB)
+ 3. Load universe (305 + 20 from MEFDB)
  4. Pull evidence from SHDB for the full universe
  5. Data-freshness gate — abort run if the latest mart bar is too stale
  6. Three deterministic engines (trend / mean-reversion / value) each
@@ -392,7 +392,7 @@ Tables (full column-level schema in `docs/mef_design_spec.md` §"MEFDB Schema"; 
 | Table | Purpose |
 |---|---|
 | `mef.universe_stock` | The 305 stocks currently in universe |
-| `mef.universe_etf` | The 15 ETFs currently in universe |
+| `mef.universe_etf` | The 20 ETFs currently in universe |
 | `mef.daily_run` | One row per scheduled run (intent, status, timings) |
 | `mef.candidate` | Per-run, per-symbol features + posture + LLM gate decision/issue_type/reason |
 | `mef.recommendation` | Emitted recommendations with entry/exit plans, lifecycle state, provenance |

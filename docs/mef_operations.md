@@ -36,7 +36,7 @@ MEF pre-market report
 Run:      DR-000025 (premarket, completed 07:00 EDT)
 Date:     2026-04-21
 Intent:   trades for today (after 10:00 ET)
-Universe: 305 stocks, 15 ETFs
+Universe: 305 stocks, 20 ETFs
 
 Summary
 -------
@@ -375,7 +375,7 @@ ratios are persistently lopsided after that, iterate the prompt
 | `~/repos/mdc/config/notifications.yaml` | SMTP credentials (read by `email_send.py`) | yes (in MDC) |
 | `cron/mef.cron`              | Cron template (install via `crontab -e`)              | no          |
 | `notes/focus-universe-us-stocks-final.md` | Source-of-truth for the 305 stocks       | no          |
-| `notes/core-us-etfs-daily-final.md`       | Source-of-truth for the 15 ETFs          | no          |
+| `notes/core-us-etfs-daily-final.md`       | Source-of-truth for the 20 ETFs          | no          |
 | `/mnt/aftdata/logs/mef/`     | Daily cron logs                                       | n/a         |
 | `/mnt/aftdata/mef/`          | Generated artifacts root (currently unused)           | n/a         |
 

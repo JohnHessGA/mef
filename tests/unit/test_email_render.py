@@ -18,12 +18,12 @@ def test_render_empty_is_no_new_trades():
         run_uid="DR-000001",
         started_at=_fixed_time(),
         stocks_in_universe=305,
-        etfs_in_universe=15,
+        etfs_in_universe=20,
     )
     assert email.subject.startswith("MEF pre-market report")
     assert "2026-04-19" in email.subject
     assert "No new trades today." in email.body
-    assert "305 stocks, 15 ETFs" in email.body
+    assert "305 stocks, 20 ETFs" in email.body
     assert "DR-000001" in email.body
 
 
@@ -34,7 +34,7 @@ def test_render_postmarket_subject():
         run_uid="DR-000002",
         started_at=_fixed_time(),
         stocks_in_universe=305,
-        etfs_in_universe=15,
+        etfs_in_universe=20,
     )
     assert email.subject.startswith("MEF post-market report")
     assert "next trading day" in email.subject
@@ -47,7 +47,7 @@ def test_render_new_ideas_listed():
         run_uid="DR-000003",
         started_at=_fixed_time(),
         stocks_in_universe=305,
-        etfs_in_universe=15,
+        etfs_in_universe=20,
         new_ideas=[
             {"symbol": "AAPL", "posture": "bullish", "expression": "buy_shares",
              "reasoning_summary": "Above 50d, near support."},
