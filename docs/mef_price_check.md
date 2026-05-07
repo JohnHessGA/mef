@@ -63,9 +63,11 @@ The bar timestamp is used to tag `source_session`:
 | `post`    | 16:00 – 20:00      |
 | `closed`  | anything else      |
 
-Most useful on the **07:00 premarket run**, when pre-market prints can
-reflect real overnight news. The postmarket 17:30 run typically just
-confirms today's close is still the reference.
+Most useful on the **07:00 ET run**, when pre-market prints can reflect
+real overnight news. The 17:30 ET run typically just confirms today's
+close is still the reference. (The runtime no longer differentiates
+premarket vs postmarket; the `when_kind` audit field is preserved on
+`mef.daily_run` for historical context only.)
 
 ## Overwatch telemetry
 

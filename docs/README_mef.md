@@ -26,7 +26,7 @@ MEF is a **daily forecasting and recommendation tool** over a fixed, curated uni
 
 MEF also tracks the user's real holdings and every recommendation MEF has ever made, updating their status each run until they are filled, dismissed, expired, or closed. Each closed recommendation is scored win / loss / timeout with an estimated P&L for 100 shares.
 
-MEF is **advisory only**. It never trades. It sends two emails a day and provides a CLI. That's the whole user surface for v1.
+MEF is **advisory only**. It never trades. The user surface is the `mef` CLI; the daily email path still exists but is **off by default** as of 2026-05-06 (the rendered emails were too long to be useful — `mef status` is the new front door). `mef run` writes recs to MEFDB twice per weekday; emails ship only when invoked with `--send-email`.
 
 ---
 
@@ -88,15 +88,15 @@ The tool is built to ship fast, run every day, and improve from its own scoring 
   - Infer user's actual holdings from daily Fidelity Positions CSV ingest (same pattern as IRA Guard)
   - Track every MEF recommendation through its lifecycle (see §"Recommendation Lifecycle")
   - **Activation provenance** stamped at promote time (`mef_attributed` / `pre_existing` / `independent`) so future audits don't conflate ambient trades with MEF-driven ones
-- **Two daily emails** sent via direct SMTP (`smtplib` reading SMTP credentials from MDC's `notifications.yaml`) — **not** via MDC's `notify.py`, which forces its own subject/body wrapper that would mangle MEF's report. Email shows LLM-approved (and unavailable-fallback) ideas as "New ideas"; LLM-review-tagged ideas appear in a separate "Held for review" section with the LLM's one-sentence reason visible so the user can decide whether to act manually. Rejected ideas remain MEFDB-only and surface via the CLI.
+- **Email path retained but off by default** (deprecated 2026-05-06). When opted in via `mef run --send-email`, MEF still ships via direct SMTP (`smtplib` reading SMTP credentials from MDC's `notifications.yaml`) — **not** via MDC's `notify.py`, which forces its own subject/body wrapper that would mangle the report. Body shows LLM-approved (and unavailable-fallback) ideas as "New ideas" and LLM-review-tagged ideas in a separate "Held for review" section with the LLM's one-sentence reason. Rejected ideas remain MEFDB-only.
   - Idea header reads `SYMBOL[:etf] ($price) — posture — expression  [engine: …]`, with the price preferring the live Yahoo quote from `mef.price_check` and falling back to the scored SHDB close. ETF ideas carry a `:etf` tag so the reader spots them at a glance.
-  - Every idea prints its `Rec ID: R-0000xx` so `mef show <rec-id>` at the bottom is directly actionable from the email.
+  - The current daily front door is `mef status`; the email body is now reserved for ad-hoc resends and historical audit.
   - **Plain-English action plan** on its own `Plan:` line right after Rec ID — one sentence restating the entry / target / stop / hold horizon in whole-dollar, skim-friendly form ("Buy under $141, sell near $151, cut at $130. Hold up to 30 days." / "Wait for a dip to $132, then buy…" / "Sell a cash-secured put at $165-$170…"). Deterministic, no LLM call.
   - **Rich LLM rationale block** after the numeric details — `Summary:` (1–2 sentence reason), `Strengths:` (up to 2 bullets), `Concerns:` (up to 2 bullets), `Judgment:` (one-sentence "why now / why not"). Same block renders on both "New ideas" (approved) and "Held for review" items. Replaces the old single-line `Reasoning:` (which still appears as a fallback when the LLM was unavailable). Added 2026-04-21 alongside the prompt rewrite.
   - **Price-freshness sanity check** (`mef.price_check`, see `mef_price_check.md`) — annotates each idea when the live price has moved ≥1% since the SHDB close used at scoring time. ≥3% gets a ⚠ "entry zone may need refresh" warning. Never changes conviction or plan.
   - **LLM timeout retry** — the Claude CLI gate retries once on a timeout (pause 60s, bump timeout 120s → 180s) before falling through to the unavailable path. When the gate does fall through wholesale, the banner names the reason: "⚠ LLM gate was unavailable for this run **due to LLM timeouts** — ideas below were not reviewed."
 - **Data-freshness gate** — pipeline checks the latest mart bar age before ranking; warns above one threshold, aborts above another so MEF never ranks against silently-stale UDC data
-- CLI for operator use: run, status, list/show/dismiss/tag recommendations, link real trades, gate-audit, rejections, score, init-db, universe — see `mef_operations.md` for the full quick reference
+- CLI for operator use: `mef status` (recs report), `mef run` (pipeline), `mef health` (operational dashboard), `mef universe` (display) — see `mef_operations.md` for the full quick reference. The earlier broader surface (show / dismiss / report / recommendations / score / rejections / gate-audit / tag / link-trade / import-positions / init-db) is deprecated and pending removal.
 - **Four-table scoring corpus** (see `mef_audit_model.md`):
   - `mef.score` — real outcomes from trades you actually made (with optional realized P&L overlay via `mef link-trade`)
   - `mef.shadow_score` — forward-walked outcomes for every LLM-rejected candidate (makes the gate falsifiable)
@@ -118,7 +118,7 @@ The tool is built to ship fast, run every day, and improve from its own scoring 
 - DAS-derived inputs (DAS does not yet exist; revisit when it does)
 - RSE-produced inputs (RSE is still being built; revisit when knowledge artifacts are available)
 - Web UI (may come later)
-- Other notification channels (SMS, chat, push) — the two daily emails are the only outbound messages
+- Other notification channels (SMS, chat, push) — the optional daily email is the only outbound channel, and it is off by default
 
 ---
 
@@ -126,8 +126,9 @@ The tool is built to ship fast, run every day, and improve from its own scoring 
 
 The operator interacts with MEF through:
 
-1. **Two scheduled emails per trading day** (cron-driven)
-2. **A small CLI** for inspection and control
+1. **`mef status`** — terminal report showing the latest run's Actionable Stock Ideas + Watch / Not Actionable + ETF posture (replaces the daily emails as the primary front door, deprecated 2026-05-06)
+2. **Twice-daily cron** at 07:00 and 17:30 ET that runs `mef run` to produce fresh recs (the schedule is still in place; only email send was disabled)
+3. **A small CLI** for inspection: `mef status`, `mef run`, `mef health`, `mef universe`
 
 ### Daily Emails
 
@@ -150,24 +151,31 @@ Both emails are sent every trading day, whether or not there are new ideas. "No 
 
 ### CLI
 
-Full quick reference + day-to-day usage lives in **`mef_operations.md`**. Highlights:
+The active surface is four bare verbs (no required `--option` flags):
 
 | Command | Purpose |
 |---|---|
-| `mef run --when {premarket\|postmarket} [--dry-run]` | Execute one scheduled run (entry point for cron); `--dry-run` skips email send |
-| `mef status` | Environment, data freshness, last run, DB connectivity |
-| `mef recommendations [--state X\|--all\|--symbol\|--since <date>]` | List recommendations with lifecycle state |
-| `mef show <rec-uid>` | Full detail (gate decision, rich LLM rationale, paper-score outcome, P&L curve, provenance) |
-| `mef dismiss <rec-uid> [--note]` | Mark a proposed recommendation as not-implemented |
-| `mef tag <rec-uid> --provenance ...` | Override inferred activation provenance |
-| `mef link-trade <rec-uid> --qty --buy-price --buy-date [--sell-...]` | Record actual buy/sell on a scored rec |
-| `mef rejections [--symbol\|--since\|--limit]` | Audit table of LLM-rejected candidates with summary + concerns |
-| `mef gate-audit` | Side-by-side outcome distribution of approve / review / reject / unavailable |
-| `mef score` | Re-evaluate closed recs and refresh paper + shadow scoring |
-| `mef import-positions <csv>` | Ingest a Fidelity Portfolio Positions CSV |
-| `mef universe [load]` | Show or reload the 305+20 universe |
-| `mef report --when {premarket\|postmarket} [--run UID]` | Regenerate the email body for a run from existing DB state, no SMTP |
-| `mef init-db` | Apply MEFDB + Overwatch migrations (idempotent) |
+| `mef`                 | Print help (no implicit dispatch) |
+| `mef status`          | User-facing investing report — Actionable Stock Ideas + Watch / Not Actionable, plus ETF posture |
+| `mef run`             | Execute the pipeline (writes daily_run + recs to MEFDB; **no email by default**) |
+| `mef run --send-email`| Same, plus send the email — opt-in |
+| `mef health`          | Operator dashboard: env, DB connectivity, latest run summary, mart freshness, recent OW alerts |
+| `mef universe`        | Read-only view of the 305 stocks + 20 ETFs |
+
+The following are **deprecated and pending removal**. They still parse and run for transitional compatibility but emit a stderr deprecation notice and are tagged `[DEPRECATED]` in `mef --help`. Do not build new flows on them:
+
+| Deprecated | Replacement |
+|---|---|
+| `mef report --when {pre\|post}` | `mef status` (current rec view) |
+| `mef recommendations [...]` | `mef status` (history view dropped on purpose) |
+| `mef show <rec-uid>` | (no replacement — surface needed info in `mef status` if missing) |
+| `mef dismiss <rec-uid>` | (no replacement — recs are advisory) |
+| `mef import-positions <csv>` | (read PHDB directly when needed) |
+| `mef score`, `mef rejections`, `mef gate-audit`, `mef tag`, `mef link-trade` | (admin/debug only — query MEFDB directly) |
+| `mef init-db` | `psql -f sql/mefdb/*.sql` (one-time setup) |
+| `mef universe load` | (operator-curated; rebuild with SQL) |
+| `mef run --when {pre\|post}` | `mef run` — `--when` accepted for cron back-compat (hidden) but no longer required |
+| `mef run --dry-run` | now the **default**; use `--send-email` to opt in
 
 ---
 
@@ -176,7 +184,7 @@ Full quick reference + day-to-day usage lives in **`mef_operations.md`**. Highli
 MEF operates over a **fixed** universe for the foreseeable future:
 
 - **305 US stocks** — derived from the 782-symbol focus universe by successive liquidity / market-cap / options filters (≥$20 avg close, ≥300K avg share volume, ≥$50M avg dollar volume, market cap ≥$30B, ≥2 listed-options expirations, total OI ≥500). Source of truth: `notes/focus-universe-us-stocks-final.md`.
-- **15 core US ETFs** — broad market (SPY, QQQ, VTI), size (IWM), style/factor (IWD, IWF, SCHD), sectors (XLK, XLF, XLV, XLE, XLI, XLY, XLP), industry (SMH). Source of truth: `notes/core-us-etfs-daily-final.md`.
+- **20 core US ETFs** — broad market (SPY, QQQ, VTI, ONEQ), size (IWM), style/factor (IWD, IWF, SCHD, SCHG, SPYG, VUG, QUAL), sectors (XLK, XLF, XLV, XLE, XLI, XLY, XLP), industry (SMH). Expanded from 15 → 20 on 2026-05-05. Source of truth: `notes/core-us-etfs-daily-final.md`.
 
 The universe is stored in MEFDB tables (`mef.universe_stock`, `mef.universe_etf`) so MEF reads it from the database at runtime, not from the markdown notes. The notes remain the human-readable source; a small loader (`mef universe load`) syncs the tables from those files when the lists change. There is no automatic refresh in v1.
 
@@ -305,7 +313,7 @@ MEF uses **Claude CLI (`claude -p`)** for the final-review step. The integration
 The LLM is a **gate**, not an idea generator. Model: **Opus 4.7** (upgraded from haiku on 2026-04-21). It returns a 3-way disposition per candidate:
 
 - `approve` — strong enough to be presented as a live recommendation now. Becomes a recommendation, appears in the email as "New ideas".
-- `review` — shows merit, deserves human inspection, not confident enough to auto-ship. Becomes a recommendation, shown in the email under a separate **"Held for review"** section with the full LLM rationale so the user can decide whether to act manually. Also visible via `mef recommendations --state proposed`.
+- `review` — shows merit, deserves human inspection, not confident enough to auto-ship. Becomes a recommendation, surfaced as **"Watch / Not Actionable"** in `mef status` (and in the deprecated email body's "Held for review" section) with the full LLM rationale so the user can decide whether to act manually.
 - `reject` — not sufficiently compelling, coherent, or timely. Not shipped. Audit trail on `mef.candidate` (decision + rich output columns).
 
 Each disposition carries **structured rationale** (as of 2026-04-21): `summary` (1–2 sentence reason), `strengths[]` (up to 3 bullets), `concerns[]` (up to 3 bullets), and `key_judgment` (one-sentence "why now / why not"). The legacy `issue_type` enum is deprecated — the `concerns` bullets carry that signal in more useful form.
@@ -332,9 +340,9 @@ If the LLM call fails, MEF ships the ideas anyway tagged `unavailable` ("Not rev
 
 ## Output
 
-**Two emails per trading day** (pre-market and post-market), sent via **direct SMTP** (`smtplib` reading SMTP credentials from MDC's `notifications.yaml`). MEF deliberately does **not** route through MDC's `notify.py`, which forces its own subject/body wrapper that would mangle the report. Both emails always send — there is no "quiet when nothing changes" behavior. A weak-evidence day produces a short email that says so. Aside from these two scheduled emails, MEF sends **no other notifications** — no SMS, no per-event alerts, no failure pages. Operational failures surface via Overwatch and cron logs.
+**Email path retained but off by default** (deprecated 2026-05-06 — emails were too long to be useful). When invoked with `mef run --send-email`, MEF still renders the same body and ships via **direct SMTP** (`smtplib` reading SMTP credentials from MDC's `notifications.yaml`); MEF deliberately does **not** route through MDC's `notify.py`, which would mangle the report. The current daily front door is `mef status`. MEF sends **no other notifications** — no SMS, no per-event alerts, no failure pages. Operational failures surface via Overwatch and `mef health`.
 
-The email shows LLM-approved (and unavailable-fallback) ideas as "New ideas" and LLM-review-tagged ideas in a separate "Held for review" section with the LLM's one-sentence reason visible. Rejected ideas stay MEFDB-only and are visible via `mef recommendations --state proposed` and `mef rejections`.
+When invoked with `--send-email`, the body shows LLM-approved (and unavailable-fallback) ideas as "New ideas" and LLM-review-tagged ideas in a separate "Held for review" section with the LLM's one-sentence reason visible. `mef status` surfaces the same split as **Actionable Stock Ideas** vs **Watch / Not Actionable** without sending email. Rejected ideas stay MEFDB-only.
 
 Email body sections:
 

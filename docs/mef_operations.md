@@ -1,6 +1,6 @@
 # MEF Operations Guide
 
-Version: 2026-04-20
+Version: 2026-05-06
 Status: Living document — update when behavior or commands change.
 
 How to use MEF day-to-day. The build specs (`README_mef.md`,
@@ -9,23 +9,44 @@ what to do with it once it's running.
 
 ---
 
+## CLI shape (2026-05-06)
+
+The CLI was simplified to four bare verbs with no required `--option`
+flags. The earlier wider surface is **deprecated and pending removal** —
+those subcommands still parse and run, but `mef --help` tags them
+`[DEPRECATED]` and they emit a stderr notice when invoked.
+
+| Command          | Purpose                                                                      |
+|------------------|------------------------------------------------------------------------------|
+| `mef`            | Print help. Bare invocation does not dispatch.                               |
+| `mef status`     | User-facing report: Actionable Stock Ideas / Watch / ETF posture (no email). |
+| `mef run`        | Execute the pipeline. Writes to MEFDB. **No email** unless `--send-email`.   |
+| `mef health`     | Operator dashboard: env, DB, latest run, mart freshness, recent OW alerts.   |
+| `mef universe`   | Read-only view of the 305 stocks + 20 ETFs.                                  |
+
+Deprecated (`init-db`, `report`, `recommendations`, `show`, `dismiss`,
+`import-positions`, `score`, `rejections`, `gate-audit`, `tag`,
+`link-trade`, `universe load`) keep working through this transition;
+do not build new flows on them. The historical sections below still
+describe their behavior for now.
+
+---
+
 ## The daily rhythm
 
 MEF runs itself twice each weekday via cron (see `mef_cron.md`):
 
-| Run        | Cron time | Intent                                  |
-|------------|-----------|-----------------------------------------|
-| Pre-market | 07:00 ET  | Trades for **today, after 10:00 AM ET** |
-| Post-market| 17:30 ET  | Trades for the **next trading day**     |
+| Run | Cron time | Intent |
+|---|---|---|
+| 07:00 ET | Mon–Fri | Trades for **today, after 10:00 AM ET** (early run) |
+| 17:30 ET | Mon–Fri | Trades for the **next trading day** (late run) |
 
-You will receive an email after each scheduled run. The email has two
-idea sections: "New ideas" for LLM-approved (and unavailable-fallback)
-picks that are safe to auto-ship, and "Held for review" for LLM-review
--tagged picks that need human judgment — each shown with the LLM's
-one-sentence reason so you can decide whether to act manually.
-Rejected ideas do not appear in the email; they're MEFDB-only and
-surface via `mef rejections`. See [Held for review](#held-for-review)
-below.
+The `premarket` / `postmarket` labels still appear in the daily_run
+audit field but the runtime no longer differentiates — `mef run`
+produces the best slate it can from whatever data is current at that
+time. Email send is **off by default**; cron currently does not pass
+`--send-email`, so MEFDB gets fresh recs twice a day but no email
+ships unless you opt in. The operator's daily front door is `mef status`.
 
 A typical email looks like:
 
@@ -120,24 +141,31 @@ failure (see `CLAUDE.md` core principle #7).
 
 ## CLI quick reference
 
-Most-frequent first.
+Active surface (most-frequent first):
 
-| Command                                  | When to use it                                                                                  |
-|------------------------------------------|-------------------------------------------------------------------------------------------------|
-| `mef status`                             | Quick check: DBs reachable, latest run, latest mart bar date                                    |
-| `mef recommendations [--state X]`        | List recommendations by lifecycle state (see [Reading recommendations](#reading-recommendations)) |
-| `mef show <rec-uid>`                     | Full detail on one rec — gate decision, paper-score outcome, P&L curve                          |
-| `mef report --when premarket`            | Re-render the most recent pre-market email body without sending                                 |
-| `mef rejections`                         | Audit table of every LLM-rejected candidate (with summary + concerns)                           |
-| `mef dismiss <rec-uid> [--note "..."]`   | Mark a `proposed` rec as not-going-to-implement                                                 |
-| `mef tag <rec-uid> --provenance ...`     | Override the inferred provenance on an active rec (see [Provenance](#provenance))               |
-| `mef link-trade <rec-uid> --qty ...`     | Record an actual buy/sell on a scored rec (see [Linking real trades](#linking-real-trades))     |
-| `mef gate-audit`                         | Side-by-side outcome distribution of LLM approve / review / reject / unavailable                |
-| `mef score`                              | Force-refresh scoring + paper + shadow scores (cron does this automatically)                    |
-| `mef import-positions <fidelity.csv>`    | Ingest a Fidelity Portfolio Positions CSV (auto-activates matching `proposed` recs)             |
-| `mef run --when premarket --dry-run`     | Run the full pipeline but skip sending the email — preview tomorrow's email tonight             |
-| `mef universe [load]`                    | Show or reload the 305+20 universe from the `notes/` files                                      |
-| `mef init-db`                            | Apply MEFDB + Overwatch migrations (idempotent; safe to re-run)                                 |
+| Command          | When to use it |
+|------------------|----------------|
+| `mef status`     | Latest recs as Actionable + Watch, plus ETF posture. Primary daily front door. |
+| `mef run`        | Force a fresh pipeline run (cron does this automatically). No email by default. |
+| `mef run --send-email` | Same, plus ship the rendered email via SMTP. |
+| `mef health`     | Operator dashboard: env probes, DB, latest run summary, mart freshness, OW alerts. |
+| `mef universe`   | Read-only view of the 305 stocks + 20 ETFs. |
+
+Deprecated (still work but pending removal — do not write new tooling against these):
+
+| Command | Replacement |
+|---|---|
+| `mef recommendations [...]` | `mef status` (current view) — historical view dropped |
+| `mef show <rec-uid>` | Query MEFDB directly, or surface the field in `mef status` if needed |
+| `mef report --when {pre\|post}` | `mef status` |
+| `mef dismiss <rec-uid>`, `mef tag`, `mef link-trade` | Recs are advisory; the lifecycle-augmentation flows are off the roadmap |
+| `mef rejections`, `mef gate-audit` | Query MEFDB directly when auditing |
+| `mef score` | Runs automatically inside `mef run`; manual refresh is rarely needed |
+| `mef import-positions <csv>` | Read PHDB directly when needed (IRA Guard already imports the same CSV) |
+| `mef universe load` | Operator-curated; rebuild with the SQL migration |
+| `mef init-db` | `psql -f sql/mefdb/*.sql` (one-time setup) |
+| `mef run --when {pre\|post}` | `mef run` — `--when` accepted hidden for cron back-compat |
+| `mef run --dry-run` | now the default; `--send-email` opts in |
 
 `mef --help` is authoritative if any command drifts from this table.
 
@@ -330,10 +358,11 @@ Every **quarter** (parked until ~3 months of data exists, milestone 17):
    PGPASSWORD=mef_local_2026 psql -h localhost -U mef_user -d overwatch \
      -c "SELECT * FROM ow.mef_run ORDER BY started_at DESC LIMIT 5;"
    ```
-3. Re-render the body for the run that should have sent:
+3. Inspect what the latest run actually produced:
    ```bash
-   mef report --when premarket
+   mef status
    ```
+   (The deprecated `mef report --when {pre|post}` still works for re-rendering the email body verbatim, but `mef status` is the canonical view.)
 
 ### The email banner says "data is stale"
 

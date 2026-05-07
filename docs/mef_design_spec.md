@@ -1,9 +1,19 @@
 # MEF Design Spec
 
-Version: 2026-04-19
+Version: 2026-04-19 (CLI surface updated 2026-05-06)
 Companion doc: `docs/README_mef.md` (build specification, scope, UX)
 
 This document is the **technical** view of MEF: components, data model, pipeline, scoring, LLM policy, and MEFDB schema. The README is the source of truth for scope and user experience; this spec is the source of truth for architecture.
+
+> **2026-05-06 — CLI shape update.** The user-facing surface has been
+> simplified to four bare verbs: `mef status` (recs report), `mef run`
+> (pipeline), `mef health` (operational dashboard), `mef universe`
+> (display). Email send is opt-in (`--send-email`); cron currently
+> writes recs without emailing. The earlier wider command set is
+> deprecated and pending removal — see `docs/mef_operations.md`. The
+> spec text below still uses the old names where it discusses behavior;
+> the **behavior** described is correct, only the command surface that
+> exposes it has shrunk.
 
 ---
 

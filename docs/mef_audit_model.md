@@ -3,6 +3,12 @@
 Version: 2026-04-21
 Status: Reference — update when scoring tables or columns change.
 
+> **CLI note (2026-05-06).** Examples below reference `mef show`,
+> `mef score`, `mef run`. `mef show` and `mef score` are now
+> `[DEPRECATED]` (still parse, but pending removal); query MEFDB
+> directly when auditing. `mef run` is unchanged in behavior; email
+> ship is now opt-in via `--send-email`.
+
 MEF stores **four parallel scoring tables** that together answer
 "is this system working, and is the LLM gate adding value?" Each
 table has a focused purpose; together they collapse the validation

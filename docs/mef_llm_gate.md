@@ -3,6 +3,11 @@
 Version: 2026-04-21 (v3 rewrite)
 Status: Active design — update when the prompt or disposition vocabulary changes.
 
+> **CLI note (2026-05-06).** `mef recommendations`, `mef show`, and
+> `mef run --dry-run` shown below are `[DEPRECATED]`. Use `mef status`
+> for the current rec view; `mef run` (no flags) for a no-email
+> pipeline run; query MEFDB directly for per-rec detail.
+
 The LLM is a **gate**, not an idea generator. The deterministic ranker
 decides what's a candidate; the LLM decides whether each candidate is
 worth considering now.
