@@ -1,9 +1,8 @@
-"""`mef run --when {premarket|postmarket}` — skeleton daily run.
+"""`mef run` — execute the MEF pipeline.
 
-v0: executes the pipeline in ``mef.run_pipeline``, which writes a
-``mef.daily_run`` row and renders an email body. Delivery via notify.py is
-not yet wired — the rendered subject + body are printed to stdout so the
-operator can preview what the scheduled run would send.
+Writes a ``mef.daily_run`` row plus candidates/recommendations and renders
+an email body. Email is *not* sent unless ``--send-email`` is passed; the
+rendered subject + body are printed to stdout for review.
 """
 
 from __future__ import annotations
@@ -12,10 +11,14 @@ from mef.run_pipeline import execute
 
 
 def run(args) -> int:
-    summary = execute(args.when, dry_run=getattr(args, "dry_run", False))
+    when = getattr(args, "when", "postmarket") or "postmarket"
+    send_email = bool(getattr(args, "send_email", False))
+    summary = execute(when, dry_run=not send_email)
 
     print(f"MEF run — {summary['when_kind']} ({summary['intent']})")
     print("=" * 46)
+    if not send_email:
+        print("  email send:              SKIPPED (use --send-email to send)")
     print(f"  run uid:                 {summary['run_uid']}")
     print(f"  as-of date:              {summary.get('as_of_date', '?')}")
     print(f"  universe total:          {summary.get('universe_total', '?')}")

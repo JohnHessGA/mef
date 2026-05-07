@@ -1,19 +1,24 @@
 """MEF command-line entry point.
 
-Subcommands (target set per docs/README_mef.md §"User Experience / CLI"):
+Target shape (AFT style — bare verbs, no required flags):
 
-- mef run --when {premarket|postmarket} — scheduled daily run
-- mef status                            — environment & data-source overview
-- mef init-db                           — apply MEFDB migrations
-- mef universe [load]                   — show or reload the 305+20 universe
-- mef recommendations [...]             — list recommendations by state
-- mef show <rec-id>                     — detail on a recommendation
-- mef dismiss <rec-id>                  — mark a proposed rec as not-implemented
-- mef import-positions <csv>            — ingest a Fidelity Positions CSV
-- mef score                             — refresh scoring on closed recs
-- mef report --when {premarket|postmarket} — render email body without sending
+    mef             show this help
+    mef status      current user-facing recommendation/report view
+    mef run         run the pipeline (no email by default)
+    mef health      environment / DB / freshness checks
+    mef universe    show the 305-stock + 20-ETF universe
 
-Currently implemented: `status`, `init-db`. Other commands stub out.
+The following subcommands are *deprecated* and pending removal in a
+future cleanup. They still work for the moment so existing scripts and
+the operator's muscle memory don't break, but their `--help` output
+is prefixed with "[DEPRECATED]" and stderr emits a one-line notice
+when they run:
+
+    init-db, report, recommendations, show, dismiss, import-positions,
+    score, rejections, gate-audit, tag, link-trade, universe load
+
+DB initialization is one-time setup and should be documented; it is
+no longer part of the normal CLI surface.
 """
 
 from __future__ import annotations
@@ -22,147 +27,210 @@ import argparse
 import sys
 
 
+DEPRECATED_NOTE = (
+    "[DEPRECATED] {name} — pending removal; do not rely on this command."
+)
+
+
 # ───────────────────────────── subcommand defs ─────────────────────────────
 
 def _add_run(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("run", help="Execute one scheduled MEF run.")
+    p = sub.add_parser(
+        "run",
+        help="Run the MEF pipeline (no email by default).",
+        description=(
+            "Run the MEF pipeline. Writes a daily_run + candidates + "
+            "recommendations to MEFDB and renders an email body, but "
+            "does NOT send email unless --send-email is passed."
+        ),
+    )
+    # --when is now optional and informational. The pipeline produces the
+    # best slate it can from current data regardless of which window we're
+    # nominally in. Kept for backward compatibility with cron entries.
     p.add_argument(
         "--when",
-        required=True,
         choices=["premarket", "postmarket"],
-        help="Which scheduled run this is.",
+        default="postmarket",
+        help=argparse.SUPPRESS,
     )
     p.add_argument(
-        "--dry-run",
+        "--send-email",
         action="store_true",
-        help="Run the full pipeline but skip sending the email.",
+        help="Send the rendered email (default: do not send).",
     )
     p.set_defaults(func=_run_mef_run)
 
 
 def _add_status(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("status", help="Show environment and data-source status.")
+    p = sub.add_parser(
+        "status",
+        help="Current recommendation / report view (transitional — currently shows health).",
+    )
     p.set_defaults(func=_run_status)
 
 
-def _add_init_db(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("init-db", help="Apply MEFDB schema migrations (idempotent).")
-    p.set_defaults(func=_run_init_db)
+def _add_health(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "health",
+        help="Environment, DB, SHDB/MEFDB, freshness, latest run, warnings.",
+    )
+    p.set_defaults(func=_run_health)
 
 
 def _add_universe(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("universe", help="Show or reload the 305+20 universe.")
+    p = sub.add_parser(
+        "universe",
+        help="Show the 305-stock + 20-ETF universe.",
+    )
     p.add_argument(
         "action",
         nargs="?",
         default="show",
         choices=["show", "load"],
-        help="'show' (default) prints the current universe; 'load' syncs MEFDB from the notes files.",
+        help="'show' (default) prints the universe; 'load' is [DEPRECATED] (pending removal).",
     )
     p.set_defaults(func=_run_universe)
 
 
+# ── Deprecated commands (kept but marked) ──
+
+def _add_init_db(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "init-db",
+        help="[DEPRECATED] Apply MEFDB migrations. Use psql + sql/mefdb/*.sql instead.",
+    )
+    p.set_defaults(func=_deprecated("init-db", _run_init_db))
+
+
 def _add_recommendations(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("recommendations", help="List recommendations by lifecycle state.")
-    p.add_argument("--state", help="Filter by lifecycle state (proposed, active, closed_win, ...).")
-    p.add_argument("--all", action="store_true", help="Include closed/expired/dismissed.")
-    p.add_argument("--symbol", help="Filter by symbol.")
-    p.add_argument("--since", help="Only recs emitted on/after this date (YYYY-MM-DD).")
-    p.add_argument("--limit", type=int, help="Max rows to show (default 30).")
-    p.set_defaults(func=_run_recommendations)
+    p = sub.add_parser(
+        "recommendations",
+        help="[DEPRECATED] Historical-rec list. Use `mef status` for current recommendations.",
+    )
+    p.add_argument("--state")
+    p.add_argument("--all", action="store_true")
+    p.add_argument("--symbol")
+    p.add_argument("--since")
+    p.add_argument("--limit", type=int)
+    p.set_defaults(func=_deprecated("recommendations", _run_recommendations))
 
 
 def _add_show(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("show", help="Show full detail on a recommendation.")
-    p.add_argument("uid", help="Recommendation UID (e.g., R-000042).")
-    p.set_defaults(func=_run_show)
+    p = sub.add_parser(
+        "show",
+        help="[DEPRECATED] Show full detail on a recommendation.",
+    )
+    p.add_argument("uid")
+    p.set_defaults(func=_deprecated("show", _run_show))
 
 
 def _add_dismiss(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("dismiss", help="Mark a proposed recommendation as not-implemented.")
-    p.add_argument("rec_uid", help="Recommendation UID (e.g., R-000042).")
-    p.add_argument("--note", help="Optional reason.")
-    p.set_defaults(func=_run_dismiss)
+    p = sub.add_parser(
+        "dismiss",
+        help="[DEPRECATED] Mark a proposed recommendation as not-implemented.",
+    )
+    p.add_argument("rec_uid")
+    p.add_argument("--note")
+    p.set_defaults(func=_deprecated("dismiss", _run_dismiss))
 
 
 def _add_import_positions(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("import-positions", help="Ingest a Fidelity Portfolio Positions CSV.")
-    p.add_argument("csv_path", help="Path to the Fidelity Portfolio Positions CSV.")
-    p.set_defaults(func=_run_import_positions)
+    p = sub.add_parser(
+        "import-positions",
+        help="[DEPRECATED] Ingest a Fidelity Positions CSV. MEF will read PHDB instead.",
+    )
+    p.add_argument("csv_path")
+    p.set_defaults(func=_deprecated("import-positions", _run_import_positions))
 
 
 def _add_score(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("score", help="Refresh scoring on closed recommendations.")
-    p.set_defaults(func=_run_score)
+    p = sub.add_parser(
+        "score",
+        help="[DEPRECATED] Refresh scoring on closed recommendations.",
+    )
+    p.set_defaults(func=_deprecated("score", _run_score))
 
 
 def _add_rejections(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("rejections", help="List LLM-rejected candidates for audit.")
-    p.add_argument("--symbol", help="Filter by symbol.")
-    p.add_argument("--since", help="Only rejections on/after this date (YYYY-MM-DD).")
-    p.add_argument("--limit", type=int, help="Max rows to show (default 20).")
-    p.set_defaults(func=_run_rejections)
+    p = sub.add_parser(
+        "rejections",
+        help="[DEPRECATED] LLM-gate debugging.",
+    )
+    p.add_argument("--symbol")
+    p.add_argument("--since")
+    p.add_argument("--limit", type=int)
+    p.set_defaults(func=_deprecated("rejections", _run_rejections))
 
 
 def _add_gate_audit(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "gate-audit",
-        help="Compare approved vs rejected outcome distributions to test if the LLM gate helps.",
+        help="[DEPRECATED] LLM-gate outcome comparison.",
     )
-    p.set_defaults(func=_run_gate_audit)
+    p.set_defaults(func=_deprecated("gate-audit", _run_gate_audit))
 
 
 def _add_tag(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "tag",
-        help="Override the inferred activation provenance on a recommendation.",
+        help="[DEPRECATED] Override the inferred activation provenance on a recommendation.",
     )
-    p.add_argument("rec_uid", help="Recommendation UID (e.g., R-000042).")
+    p.add_argument("rec_uid")
     p.add_argument(
         "--provenance",
         required=True,
         choices=["mef_attributed", "pre_existing", "independent"],
-        help="What actually drove the position match.",
     )
-    p.set_defaults(func=_run_tag)
+    p.set_defaults(func=_deprecated("tag", _run_tag))
 
 
 def _add_link_trade(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "link-trade",
-        help="Record the actual buy/sell on a scored recommendation.",
+        help="[DEPRECATED] Record actual buy/sell on a scored recommendation.",
     )
-    p.add_argument("rec_uid", help="Recommendation UID (e.g., R-000042).")
-    p.add_argument("--qty",         required=True, type=float, help="Shares traded.")
-    p.add_argument("--buy-price",   required=True, type=float, help="Actual buy fill price.")
-    p.add_argument("--buy-date",    required=True, help="Buy date (YYYY-MM-DD).")
-    p.add_argument("--sell-price",  type=float, help="Actual sell fill price (optional while holding).")
-    p.add_argument("--sell-date",   help="Sell date (YYYY-MM-DD; optional while holding).")
-    p.set_defaults(func=_run_link_trade)
+    p.add_argument("rec_uid")
+    p.add_argument("--qty",        required=True, type=float)
+    p.add_argument("--buy-price",  required=True, type=float)
+    p.add_argument("--buy-date",   required=True)
+    p.add_argument("--sell-price", type=float)
+    p.add_argument("--sell-date")
+    p.set_defaults(func=_deprecated("link-trade", _run_link_trade))
 
 
 def _add_report(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("report", help="Render the email report for a given run without sending.")
+    p = sub.add_parser(
+        "report",
+        help="[DEPRECATED] Render the email body. Use `mef status` for current recs.",
+    )
     p.add_argument(
         "--when",
         required=True,
         choices=["premarket", "postmarket"],
-        help="Which report to render.",
     )
-    p.add_argument("--run", help="Specific run UID (defaults to latest matching --when).")
-    p.set_defaults(func=_run_report)
+    p.add_argument("--run")
+    p.set_defaults(func=_deprecated("report", _run_report))
 
 
 # ───────────────────────────── dispatchers ─────────────────────────────
 
-def _stub(name: str):
-    def _unimplemented(args) -> int:
-        print(f"mef {name}: not yet implemented.", file=sys.stderr)
-        return 2
-    return _unimplemented
+def _deprecated(name: str, inner):
+    """Wrap a dispatcher with a stderr deprecation notice."""
+    def _wrapped(args) -> int:
+        print(DEPRECATED_NOTE.format(name=name), file=sys.stderr)
+        return inner(args)
+    return _wrapped
 
 
 def _run_status(args) -> int:
+    # Step 1 transitional: `mef status` still runs the env/health view
+    # while `mef health` is the canonical name. Step 2 will rewrite this
+    # into the user-facing recommendation report.
+    from mef.commands import status
+    return status.run(args)
+
+
+def _run_health(args) -> int:
     from mef.commands import status
     return status.run(args)
 
@@ -173,6 +241,8 @@ def _run_init_db(args) -> int:
 
 
 def _run_universe(args) -> int:
+    if getattr(args, "action", "show") == "load":
+        print(DEPRECATED_NOTE.format(name="universe load"), file=sys.stderr)
     from mef.commands import universe
     return universe.run(args)
 
@@ -239,11 +309,16 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="mef",
         description="Muse Engine Forecaster — daily forecasting and recommendation tool.",
     )
-    sub = parser.add_subparsers(dest="command", required=True)
-    _add_run(sub)
+    sub = parser.add_subparsers(dest="command")
+
+    # Active commands
     _add_status(sub)
-    _add_init_db(sub)
+    _add_run(sub)
+    _add_health(sub)
     _add_universe(sub)
+
+    # Deprecated commands (still parseable, marked in --help)
+    _add_init_db(sub)
     _add_recommendations(sub)
     _add_show(sub)
     _add_dismiss(sub)
@@ -254,12 +329,16 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_tag(sub)
     _add_link_trade(sub)
     _add_report(sub)
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if not getattr(args, "command", None):
+        parser.print_help()
+        return 0
     return args.func(args)
 
 
