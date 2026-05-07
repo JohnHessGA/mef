@@ -64,7 +64,7 @@ def _add_run(sub: argparse._SubParsersAction) -> None:
 def _add_status(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "status",
-        help="Current recommendation / report view (transitional — currently shows health).",
+        help="Current MEF recommendations and ETF posture (read-only).",
     )
     p.set_defaults(func=_run_status)
 
@@ -223,16 +223,13 @@ def _deprecated(name: str, inner):
 
 
 def _run_status(args) -> int:
-    # Step 1 transitional: `mef status` still runs the env/health view
-    # while `mef health` is the canonical name. Step 2 will rewrite this
-    # into the user-facing recommendation report.
     from mef.commands import status
     return status.run(args)
 
 
 def _run_health(args) -> int:
-    from mef.commands import status
-    return status.run(args)
+    from mef.commands import health
+    return health.run(args)
 
 
 def _run_init_db(args) -> int:
