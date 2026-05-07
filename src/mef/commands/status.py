@@ -1,18 +1,26 @@
-"""`mef status` — current MEF recommendation report (read-only).
+"""`mef status` — user-facing investing report (read-only).
 
-Single user-facing view answering "what does MEF currently think?".
-Reads MEFDB, OW, and SHDB; never writes; never sends email; never runs
-the pipeline. Pure reporting layer over what the latest scheduled run
-already produced.
+Compact header + two sections:
+
+  Actionable Stock Ideas — recs the LLM gate cleared (`approve`) and
+                          where the price is consistent with the plan.
+  Watch / Not Actionable — recs the gate held for review, or that show
+                          posture/evidence mismatch, missing
+                          stabilization, or low conviction.
+
+Plus the ETF posture summary as informational market context.
+
+No latest-run metadata, no DB connectivity, no recent-alert telemetry —
+that lives in `mef health`. No DB writes, no email, no pipeline run.
 """
 
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime
 from typing import Any
 
-from mef.db.connection import connect_mefdb, connect_overwatch, connect_shdb
+from mef.db.connection import connect_mefdb, connect_shdb
 
 
 # ───────────────────────────── public entry ─────────────────────────────
@@ -28,15 +36,14 @@ def run(args) -> int:
 def _gather() -> dict[str, Any]:
     out: dict[str, Any] = {
         "now": datetime.now().astimezone(),
+        "universe": _fetch_universe_counts(),
+        "data_through": _fetch_market_data_through(),
     }
-    out["universe"] = _fetch_universe_counts()
-    out["latest_run"] = _fetch_latest_run()
-    if out["latest_run"]:
-        out["recommendations"] = _fetch_recommendations(out["latest_run"]["uid"])
+    latest_run_uid = _fetch_latest_run_uid()
+    if latest_run_uid:
+        out["recommendations"] = _fetch_recommendations(latest_run_uid)
     else:
         out["recommendations"] = []
-    out["mart_freshness"] = _fetch_mart_freshness()
-    out["recent_alerts"] = _fetch_recent_alerts(hours=24)
     out["etf_posture"] = _fetch_etf_posture()
     return out
 
@@ -58,7 +65,25 @@ def _fetch_universe_counts() -> dict[str, int]:
     return counts
 
 
-def _fetch_latest_run() -> dict[str, Any] | None:
+def _fetch_market_data_through() -> date | None:
+    try:
+        conn = connect_shdb()
+    except Exception:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT GREATEST(
+                    (SELECT max(bar_date) FROM mart.stock_equity_daily),
+                    (SELECT max(bar_date) FROM mart.stock_etf_daily)
+                )
+            """)
+            return cur.fetchone()[0]
+    finally:
+        conn.close()
+
+
+def _fetch_latest_run_uid() -> str | None:
     try:
         conn = connect_mefdb()
     except Exception:
@@ -66,20 +91,12 @@ def _fetch_latest_run() -> dict[str, Any] | None:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT uid, when_kind, intent, status, started_at, ended_at,
-                       symbols_evaluated, candidates_passed, recommendations_emitted,
-                       email_sent_at
-                  FROM mef.daily_run
-                 ORDER BY started_at DESC
-                 LIMIT 1
-                """
+                "SELECT uid FROM mef.daily_run "
+                "WHERE status IN ('ok','partial') "
+                "ORDER BY started_at DESC LIMIT 1"
             )
             row = cur.fetchone()
-            if not row:
-                return None
-            cols = [d[0] for d in cur.description]
-            return dict(zip(cols, row))
+            return row[0] if row else None
     finally:
         conn.close()
 
@@ -96,7 +113,10 @@ def _fetch_recommendations(run_uid: str) -> list[dict[str, Any]]:
                 SELECT r.uid, r.symbol, r.asset_kind, r.posture, r.expression,
                        r.entry_method, r.stop_level, r.target_level,
                        r.confidence, r.state, r.reasoning_summary,
-                       c.engine, c.hazard_event_type, c.hazard_flags,
+                       c.engine,
+                       c.llm_gate_decision, c.llm_gate_issue_type,
+                       c.llm_gate_key_judgment,
+                       (c.feature_json->>'close')::numeric AS close,
                        us.company_name
                   FROM mef.recommendation r
                   JOIN mef.candidate c ON r.candidate_uid = c.uid
@@ -110,88 +130,6 @@ def _fetch_recommendations(run_uid: str) -> list[dict[str, Any]]:
             return [dict(zip(cols, row)) for row in cur.fetchall()]
     finally:
         conn.close()
-
-
-def _fetch_mart_freshness() -> dict[str, Any]:
-    """Compute mart freshness using the same source set and thresholds as the pipeline.
-
-    Pipeline rule (mef.evidence.check_freshness, strictly >):
-        age <= warn_after_calendar_days   → ok
-        age >  warn_after_calendar_days   → warn (stale)
-        age >  abort_after_calendar_days  → abort
-    """
-    from datetime import date
-
-    out: dict[str, Any] = {
-        "latest_bar": None, "days_behind": None,
-        "tier": None,  # "ok" | "stale" | "abort" | None
-        "warn_threshold": 4, "abort_threshold": 7,
-    }
-
-    try:
-        from mef.config import load_app_config
-        cfg = load_app_config().get("data_freshness", {}) or {}
-        out["warn_threshold"] = int(cfg.get("warn_after_calendar_days", 4))
-        out["abort_threshold"] = int(cfg.get("abort_after_calendar_days", 7))
-    except Exception:
-        pass  # fall through with defaults
-
-    try:
-        conn = connect_shdb()
-    except Exception:
-        return out
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT GREATEST(
-                    (SELECT max(bar_date) FROM mart.stock_equity_daily),
-                    (SELECT max(bar_date) FROM mart.stock_etf_daily)
-                )
-            """)
-            latest = cur.fetchone()[0]
-    finally:
-        conn.close()
-
-    if latest is None:
-        return out
-
-    days = (date.today() - latest).days
-    out["latest_bar"] = latest
-    out["days_behind"] = days
-    if days > out["abort_threshold"]:
-        out["tier"] = "abort"
-    elif days > out["warn_threshold"]:
-        out["tier"] = "stale"
-    else:
-        out["tier"] = "ok"
-    return out
-
-
-def _fetch_recent_alerts(hours: int = 24) -> dict[str, list[tuple[str, int]]]:
-    """Return {'error': [(code, n), ...], 'warning': [...]}."""
-    out: dict[str, list[tuple[str, int]]] = {"error": [], "warning": []}
-    try:
-        conn = connect_overwatch()
-    except Exception:
-        return out
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT severity, code, count(*)
-                  FROM ow.mef_event
-                 WHERE severity IN ('error','warning')
-                   AND created_at > now() - (%s || ' hours')::interval
-                 GROUP BY severity, code
-                 ORDER BY 1, 3 DESC
-                """,
-                (str(hours),),
-            )
-            for severity, code, n in cur.fetchall():
-                out.setdefault(severity, []).append((code, int(n)))
-    finally:
-        conn.close()
-    return out
 
 
 def _fetch_etf_posture() -> list[Any]:
@@ -215,6 +153,77 @@ def _fetch_etf_posture() -> list[Any]:
         return []
 
 
+# ───────────────────────────── classification ─────────────────────────────
+
+def _classify_actionable(rec: dict[str, Any]) -> str:
+    """Return 'actionable' or 'watch' for a recommendation row.
+
+    Primary signal is `candidate.llm_gate_decision`:
+      - 'approve'                    → actionable
+      - 'review' | 'unavailable' | NULL → watch
+
+    The pipeline never inserts 'reject' rows into `recommendation`, so
+    that case can't reach the status view in practice.
+    """
+    decision = (rec.get("llm_gate_decision") or "").strip().lower()
+    return "actionable" if decision == "approve" else "watch"
+
+
+_WATCH_REASON_PATTERNS = [
+    (re.compile(r"posture/evidence mismatch|conflicts with the named posture", re.I), "Posture mismatch"),
+    (re.compile(r"no clear sign of stabilization|without a stabilization signal|no stabilization", re.I), "No stabilization"),
+    (re.compile(r"low conviction|conviction is low", re.I), "Low conviction"),
+    (re.compile(r"missing context", re.I), "Missing context"),
+    (re.compile(r"volatility mismatch", re.I), "Volatility mismatch"),
+    (re.compile(r"risk shape", re.I), "Risk shape"),
+]
+
+_ISSUE_TYPE_LABELS = {
+    "posture_mismatch":   "Posture mismatch",
+    "missing_context":    "Missing context",
+    "mechanical":         "Mechanical concern",
+    "risk_shape":         "Risk shape",
+    "volatility_mismatch":"Volatility mismatch",
+    "asset_structure":    "Asset structure",
+    "options_structure":  "Options structure",
+}
+
+
+def _watch_status(rec: dict[str, Any]) -> str:
+    """Pick a short reason label for a Watch entry.
+
+    Prefers the structured `llm_gate_issue_type` when set; falls back to
+    keyword detection in `reasoning_summary` + `llm_gate_key_judgment`;
+    final fallback for `unavailable`/NULL gate decisions is 'Unreviewed';
+    everything else gets 'Held for review'.
+    """
+    issue = (rec.get("llm_gate_issue_type") or "").strip().lower()
+    if issue and issue != "none" and issue in _ISSUE_TYPE_LABELS:
+        return _ISSUE_TYPE_LABELS[issue]
+
+    text = " ".join(filter(None, [
+        rec.get("reasoning_summary"),
+        rec.get("llm_gate_key_judgment"),
+    ]))
+    for pattern, label in _WATCH_REASON_PATTERNS:
+        if pattern.search(text):
+            return label
+
+    decision = (rec.get("llm_gate_decision") or "").strip().lower()
+    if decision in ("unavailable", ""):
+        return "Unreviewed"
+    return "Held for review"
+
+
+def _actionable_status(rec: dict[str, Any]) -> str:
+    """For approved recs, surface 'Wait for pullback' if price is above the entry zone."""
+    close = rec.get("close")
+    entry_hi = _entry_zone_hi(rec.get("entry_method"))
+    if close is not None and entry_hi is not None and float(close) > entry_hi:
+        return "Wait for pullback"
+    return "Ready"
+
+
 # ───────────────────────────── rendering ─────────────────────────────
 
 LABEL_ORDER = (
@@ -231,155 +240,87 @@ def _render(r: dict[str, Any]) -> str:
     lines: list[str] = []
     lines.extend(_render_header(r))
     lines.append("")
-    lines.extend(_render_latest_run(r))
-    lines.append("")
-    lines.extend(_render_data_status(r))
-    lines.append("")
-    lines.extend(_render_recommendations(r))
+
+    actionable = [x for x in r["recommendations"] if _classify_actionable(x) == "actionable"]
+    watch      = [x for x in r["recommendations"] if _classify_actionable(x) == "watch"]
+
+    if not r["recommendations"]:
+        lines.append("Latest run emitted no recommendations.")
+    else:
+        lines.extend(_render_actionable(actionable))
+        lines.append("")
+        lines.extend(_render_watch(watch))
+
     lines.append("")
     lines.extend(_render_etf_posture(r))
     return "\n".join(lines)
 
 
 def _render_header(r: dict[str, Any]) -> list[str]:
-    now = r["now"]
-    u = r["universe"]
+    now = r["now"].strftime('%Y-%m-%d %H:%M %Z').strip()
+    parts = [f"Report: {now}"]
+    if r.get("data_through"):
+        parts.append(f"market data through {r['data_through']}")
+    u = r.get("universe") or {}
+    if u.get("stocks") or u.get("etfs"):
+        parts.append(f"universe {u['stocks']} stocks / {u['etfs']} ETFs")
     return [
         "MEF — Muse Engine Forecaster",
-        f"Report: {now.strftime('%Y-%m-%d %H:%M %Z').strip()}"
-        f"   |   Universe: {u['stocks']} stocks · {u['etfs']} ETFs",
+        " · ".join(parts),
     ]
 
 
-def _render_latest_run(r: dict[str, Any]) -> list[str]:
-    run = r["latest_run"]
-    if not run:
-        return ["Latest run", "  (none — MEF has not been run yet)"]
-    started = _fmt_dt(run.get("started_at"))
-    ended = run.get("ended_at")
-    duration = _fmt_duration(run.get("started_at"), ended) if ended else "running"
-    lines = [
-        "Latest run",
-        f"  uid:           {run['uid']}",
-        f"  started:       {started} ({run.get('when_kind','?')}, {duration}, status={run.get('status','?')})",
-    ]
-    pipeline = (
-        f"{run.get('symbols_evaluated','?')} evaluated → "
-        f"{run.get('candidates_passed','?')} passed → "
-        f"{run.get('recommendations_emitted','?')} emitted"
-    )
-    lines.append(f"  pipeline:      {pipeline}")
-    return lines
+WATCH_ACTION_LABEL = "Watch"
 
 
-def _render_data_status(r: dict[str, Any]) -> list[str]:
-    lines = ["Data status"]
-    f = r["mart_freshness"]
-    if f.get("latest_bar") is None:
-        lines.append("  SHDB mart:     unavailable")
-    else:
-        tier = f.get("tier")
-        if tier == "ok":
-            tag = "fresh"
-        elif tier == "stale":
-            tag = f"STALE ({f['days_behind']}d behind, warn>{f['warn_threshold']})"
-        elif tier == "abort":
-            tag = f"ABORT ({f['days_behind']}d behind, abort>{f['abort_threshold']})"
-        else:
-            tag = f"unknown ({f.get('days_behind','?')}d)"
-        lines.append(f"  SHDB mart:     latest bar {f['latest_bar']} ({tag})")
-
-    alerts = r["recent_alerts"]
-    err_total = sum(n for _, n in alerts.get("error", []))
-    warn_total = sum(n for _, n in alerts.get("warning", []))
-    if not err_total and not warn_total:
-        lines.append("  Alerts (24h):  none")
-    else:
-        parts = []
-        if err_total:
-            err_codes = ", ".join(f"{c}×{n}" for c, n in alerts["error"])
-            parts.append(f"{err_total} error ({err_codes})")
-        if warn_total:
-            warn_codes = ", ".join(f"{c}×{n}" for c, n in alerts["warning"])
-            parts.append(f"{warn_total} warning ({warn_codes})")
-        lines.append(f"  Alerts (24h):  {' · '.join(parts)}")
-    return lines
-
-
-def _render_recommendations(r: dict[str, Any]) -> list[str]:
-    recs = r["recommendations"]
+def _render_actionable(recs: list[dict[str, Any]]) -> list[str]:
+    out = [f"Actionable Stock Ideas ({len(recs)})", ""]
     if not recs:
-        return ["Recommendations", "  (latest run emitted no recommendations)"]
-
-    lines = [f"Recommendations ({len(recs)})"]
-    header = (
-        f"  {'conv':>4}  {'sym':<5}  {'name':<22}  "
-        f"{'engine':<8}  {'posture':<17}  "
-        f"{'entry':<11}  {'stop':>5}  {'target':>6}"
-    )
-    lines.append(header)
+        out.append("  No actionable ideas right now.")
+        return out
+    blocks: list[str] = []
     for rec in recs:
-        lines.extend(_format_rec_block(rec))
-    return lines
+        action = _action_label(rec.get("expression"))
+        blocks.append("\n".join(_format_idea_block(rec, action, _actionable_status(rec))))
+    out.append("\n\n".join(blocks))
+    return out
 
 
-def _format_rec_block(rec: dict[str, Any]) -> list[str]:
-    conv = _fmt_conf(rec.get("confidence"))
-    sym = (rec.get("symbol") or "?")[:5]
-    name = _short_name(rec.get("company_name"), 22)
-    engine = _short_engine(rec.get("engine"))[:8]
-    posture = (rec.get("posture") or "")[:17]
-    entry = _fmt_entry_zone(rec.get("entry_method"))[:11]
-    stop = _fmt_dollars(rec.get("stop_level"))
-    target = _fmt_dollars(rec.get("target_level"))
-    head = (
-        f"  {conv:>4}  {sym:<5}  {name:<22}  "
-        f"{engine:<8}  {posture:<17}  "
-        f"{entry:<11}  {stop:>5}  {target:>6}"
+def _render_watch(recs: list[dict[str, Any]]) -> list[str]:
+    out = [f"Watch / Not Actionable ({len(recs)})", ""]
+    if not recs:
+        out.append("  Nothing on watch.")
+        return out
+    blocks: list[str] = []
+    for rec in recs:
+        # Action label is fixed to "Watch" so the header never implies a buy.
+        blocks.append("\n".join(_format_idea_block(rec, WATCH_ACTION_LABEL, _watch_status(rec))))
+    out.append("\n\n".join(blocks))
+    return out
+
+
+def _format_idea_block(rec: dict[str, Any], action_label: str, status_label: str) -> list[str]:
+    sym = rec.get("symbol") or "?"
+    thesis = _short_reason(rec.get("reasoning_summary"), max_len=70)
+    head = f"  {sym} — {action_label} / {status_label}"
+    if thesis:
+        head = f"{head} — {thesis}"
+
+    plan = (
+        f"    Entry {_fmt_entry_zone(rec.get('entry_method'))} · "
+        f"Stop {_fmt_dollars(rec.get('stop_level'))} · "
+        f"Target {_fmt_dollars(rec.get('target_level'))} · "
+        f"{_fmt_conf(rec.get('confidence'))} conv"
     )
 
-    reason = _short_reason(rec.get("reasoning_summary"), max_len=90)
-    flags = _meaningful_hazards(rec.get("hazard_event_type"), rec.get("hazard_flags"))
-    detail = "        " + reason if reason else ""
-    if flags:
-        suffix = f"  [{', '.join(flags)}]"
-        detail = (detail + suffix) if detail else "        " + suffix.lstrip()
+    detail = rec.get("llm_gate_key_judgment") or rec.get("reasoning_summary") or ""
+    detail_line = f"    {_truncate(detail, 96)}" if detail else ""
 
-    out = [head]
-    if detail:
-        out.append(detail)
-    return out
-
-
-def _short_name(name: str | None, max_len: int) -> str:
-    if not name:
-        return ""
-    name = name.strip()
-    return name if len(name) <= max_len else name[: max_len - 1] + "…"
-
-
-_GENERIC_HAZARD_FLAGS = {"macro:other"}
-
-
-def _meaningful_hazards(event_type: str | None, flags) -> list[str]:
-    """Return the subset of hazard signals worth surfacing in the terminal.
-
-    `macro:other` is the generic baseline tag emitted on every candidate
-    and adds no information; suppress it. Flags like `macro:fomc`,
-    `macro:pce`, and any `earn_prox:*` carry actual signal.
-    """
-    out: list[str] = []
-    if event_type and event_type != "other":
-        out.append(f"event:{event_type}")
-    if flags:
-        for f in flags:
-            if f and f not in _GENERIC_HAZARD_FLAGS:
-                out.append(f)
-    return out
+    return [head, plan] + ([detail_line] if detail_line else [])
 
 
 def _render_etf_posture(r: dict[str, Any]) -> list[str]:
-    labels = r["etf_posture"]
+    labels = r.get("etf_posture") or []
     if not labels:
         return ["ETF posture", "  (unavailable)"]
 
@@ -401,17 +342,12 @@ def _render_etf_posture(r: dict[str, Any]) -> list[str]:
 
 # ───────────────────────────── formatters ─────────────────────────────
 
-_ENGINE_SHORT = {
-    "trend": "trend",
-    "value": "value",
-    "mean_reversion": "mean_rev",
-}
-
-
-def _short_engine(engine: str | None) -> str:
-    if not engine:
+def _action_label(expression: str | None) -> str:
+    if not expression:
         return "?"
-    return _ENGINE_SHORT.get(engine, engine)
+    return {"buy_shares": "Buy", "sell_shares": "Sell", "short_shares": "Short"}.get(
+        expression, expression.replace("_", " ").title()
+    )
 
 
 def _fmt_conf(v) -> str:
@@ -424,7 +360,6 @@ def _fmt_conf(v) -> str:
 
 
 def _fmt_dollars(v) -> str:
-    """Whole-dollar formatting for prices: 84.45 → '$84'."""
     if v is None:
         return "?"
     try:
@@ -437,43 +372,39 @@ _ENTRY_ZONE_RE = re.compile(r"\$([0-9.]+)\s*-\s*\$([0-9.]+)")
 
 
 def _fmt_entry_zone(entry_method: str | None) -> str:
-    """Parse entry_method like 'limit order $76.63-$78.19' → '$77-$78'."""
     if not entry_method:
         return "?"
     m = _ENTRY_ZONE_RE.search(entry_method)
     if not m:
-        return entry_method[:14]
+        return entry_method
     lo = int(round(float(m.group(1))))
     hi = int(round(float(m.group(2))))
     return f"${lo}-${hi}"
 
 
+def _entry_zone_hi(entry_method: str | None) -> float | None:
+    if not entry_method:
+        return None
+    m = _ENTRY_ZONE_RE.search(entry_method)
+    if not m:
+        return None
+    try:
+        return float(m.group(2))
+    except ValueError:
+        return None
+
+
 def _short_reason(text: str | None, max_len: int = 80) -> str:
     if not text:
         return ""
-    # Take first sentence-ish chunk (split on period, semicolon, or em-dash).
     head = re.split(r"[.;—]", text, maxsplit=1)[0].strip()
     if len(head) > max_len:
         return head[: max_len - 1] + "…"
     return head
 
 
-def _fmt_dt(dt) -> str:
-    if dt is None:
-        return "?"
-    if isinstance(dt, datetime):
-        local = dt.astimezone() if dt.tzinfo else dt.replace(tzinfo=timezone.utc).astimezone()
-        return local.strftime("%Y-%m-%d %H:%M %Z").strip()
-    return str(dt)
-
-
-def _fmt_duration(start, end) -> str:
-    if start is None or end is None:
-        return "?"
-    try:
-        secs = int((end - start).total_seconds())
-    except Exception:
-        return "?"
-    if secs < 60:
-        return f"{secs}s"
-    return f"{secs // 60}m{secs % 60:02d}s"
+def _truncate(text: str, max_len: int) -> str:
+    text = (text or "").strip()
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1] + "…"
