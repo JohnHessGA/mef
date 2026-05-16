@@ -79,7 +79,7 @@ Conceptual modules (concrete module layout lives with the code):
 
 | Component | Responsibility |
 |---|---|
-| `config` | Load `config/mef.yaml` + `config/postgres.yaml`, expose typed settings |
+| `config` | Load `config/mef.yaml` + `config/postgres.secrets.yaml`, expose typed settings |
 | `db` | MEFDB connection pool, migrations, repositories |
 | `universe` | Load/sync universe from notes files; expose in-memory universe object |
 | `shdb_reader` | Read-only SHDB queries for every evidence family |
@@ -522,7 +522,7 @@ Every LLM call is logged to `mef.llm_trace`:
 
 ## 11. MEFDB Schema
 
-PostgreSQL 16 on the shared `localhost:5432`. Database `mefdb`, schema `mef`, owner `mef_user`. Credentials in `config/postgres.yaml` (gitignored) with `mefdb` + `shdb` + `overwatch` sections.
+PostgreSQL 18.3 on the shared `localhost:5432`. Database `mefdb`, schema `mef`, owner `mef_user`. Credentials in `config/postgres.secrets.yaml` (gitignored) with `mefdb` + `shdb` + `overwatch` sections.
 
 **Table list (v1, conceptual).** Columns below list the load-bearing fields; exact column types, defaults, and indexes are finalized when DDL is written.
 
@@ -968,7 +968,7 @@ Follows MDC / UDC / RSE / IRA Guard conventions. Conventional commits (`feat:`, 
 
 ## 16. Configuration
 
-`config/mef.yaml` holds operational knobs; `config/postgres.yaml` holds credentials.
+`config/mef.yaml` holds operational knobs; `config/postgres.secrets.yaml` holds credentials.
 
 Representative `mef.yaml` structure (exact keys settled during implementation):
 
