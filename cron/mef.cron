@@ -2,7 +2,9 @@
 #
 # Two scheduled runs per trading day. America/New_York times.
 #   07:00 ET pre-market   → recommendations meant for execution today after 10:00 ET
-#   17:30 ET post-market  → recommendations meant for the next trading day
+#   17:45 ET post-market  → recommendations meant for the next trading day
+#                            (offset from 17:30 to avoid notify.py collision
+#                             with IRA Guard's 17:30 evening run)
 #
 # Both entries call the mef CLI directly (per AFT cron convention — no
 # wrapper scripts that do real work). Venv path + log redirection are the
@@ -19,4 +21,4 @@
 CRON_TZ=America/New_York
 
 0  7 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run --when premarket  >> /mnt/aftdata/logs/mef/cron.log 2>&1
-30 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run --when postmarket >> /mnt/aftdata/logs/mef/cron.log 2>&1
+45 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run --when postmarket >> /mnt/aftdata/logs/mef/cron.log 2>&1

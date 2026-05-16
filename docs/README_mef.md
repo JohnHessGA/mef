@@ -127,7 +127,7 @@ The tool is built to ship fast, run every day, and improve from its own scoring 
 The operator interacts with MEF through:
 
 1. **`mef status`** — terminal report showing the latest run's Actionable Stock Ideas + Watch / Not Actionable + ETF posture (replaces the daily emails as the primary front door, deprecated 2026-05-06)
-2. **Twice-daily cron** at 07:00 and 17:30 ET that runs `mef run` to produce fresh recs (the schedule is still in place; only email send was disabled)
+2. **Twice-daily cron** at 07:00 and 17:45 ET that runs `mef run` to produce fresh recs (the schedule is still in place; only email send was disabled)
 3. **A small CLI** for inspection: `mef status`, `mef run`, `mef health`, `mef universe`
 
 ### Daily Emails

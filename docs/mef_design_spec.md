@@ -154,7 +154,7 @@ mef run --when {premarket|postmarket}
 Pre-market and post-market runs share the pipeline; the only difference is the `intent` label on `daily_run` (`today_after_10am` vs `next_trading_day`) and whichever is the freshest available market data at run time. Cron schedule (tentative, America/New_York):
 
 - **Pre-market:** ~07:00 ET, Mon–Fri
-- **Post-market:** ~17:30 ET, Mon–Fri
+- **Post-market:** ~17:45 ET, Mon–Fri
 
 Both times finalized during implementation; they must sit after the daily SHDB refresh that feeds them.
 
@@ -975,7 +975,7 @@ Representative `mef.yaml` structure (exact keys settled during implementation):
 ```yaml
 cadence:
   premarket_cron: "0 7 * * 1-5"      # 07:00 ET Mon–Fri
-  postmarket_cron: "30 17 * * 1-5"   # 17:30 ET Mon–Fri
+  postmarket_cron: "45 17 * * 1-5"   # 17:45 ET Mon–Fri
   timezone: America/New_York
 
 ranker:

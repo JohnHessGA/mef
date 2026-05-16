@@ -13,13 +13,13 @@ but does not send email. The operator's daily front door is `mef status`
 CRON_TZ=America/New_York
 
 0  7 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run --when premarket  >> /mnt/aftdata/logs/mef/cron.log 2>&1
-30 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run --when postmarket >> /mnt/aftdata/logs/mef/cron.log 2>&1
+45 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run --when postmarket >> /mnt/aftdata/logs/mef/cron.log 2>&1
 ```
 
 | Time (ET) | Days    | Command                       | Outcome |
 |-----------|---------|-------------------------------|--------------------------------------|
 | 07:00     | Mon–Fri | `mef run --when premarket`    | Refreshes MEFDB. **No email.**       |
-| 17:30     | Mon–Fri | `mef run --when postmarket`   | Refreshes MEFDB. **No email.**       |
+| 17:45     | Mon–Fri | `mef run --when postmarket`   | Refreshes MEFDB. **No email.**       |
 
 The `--when` flag is hidden in `mef --help` and accepted only for cron
 back-compat. The runtime no longer treats premarket and postmarket
@@ -30,7 +30,7 @@ data on either fire.
 
 ```
 0  7 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run >> /mnt/aftdata/logs/mef/cron.log 2>&1
-30 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run >> /mnt/aftdata/logs/mef/cron.log 2>&1
+45 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run >> /mnt/aftdata/logs/mef/cron.log 2>&1
 ```
 
 Both lines call the `mef` CLI directly. The only "wrapper" plumbing is

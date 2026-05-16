@@ -39,7 +39,7 @@ MEF runs itself twice each weekday via cron (see `mef_cron.md`):
 | Run | Cron time | Intent |
 |---|---|---|
 | 07:00 ET | Mon–Fri | Trades for **today, after 10:00 AM ET** (early run) |
-| 17:30 ET | Mon–Fri | Trades for the **next trading day** (late run) |
+| 17:45 ET | Mon–Fri | Trades for the **next trading day** (late run) |
 
 The `premarket` / `postmarket` labels still appear in the daily_run
 audit field but the runtime no longer differentiates — `mef run`
