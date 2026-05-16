@@ -49,9 +49,9 @@ These are load-bearing. Stop and ask before crossing any of them.
 ## Environment
 
 - **Python:** 3.12, src layout, editable install via `pyproject.toml` (`pip install -e .`). Runtime deps: `psycopg2-binary`, `pyyaml`, `yfinance` (used by `mef.price_check` for post-emission live quotes).
-- **Virtual env:** `~/repos/mef/venv/` (created with `python3 -m venv venv`)
+- **Virtual env:** `~/repos/mef/.venv/` (created with `python3 -m venv .venv`)
 - **Host:** WSL2 Ubuntu 24.04 (`codex`) on Windows 11 (`hal64`)
-- **Databases:** PostgreSQL 16 + TimescaleDB on `localhost:5432`
+- **Databases:** PostgreSQL 18.3 + TimescaleDB 2.26.4 on `localhost:5432` (upgraded from PG 16 on 2026-05-07; PG 16 retained as stopped rollback copy on :5499)
   - `mefdb` — MEF's own database (schema `mef`, owner `mef_user`) — **not yet created**
   - `shdb` — primary data source (read-only, same PG instance)
   - `overwatch` — telemetry (fail-silent writes)
