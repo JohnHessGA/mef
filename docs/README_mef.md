@@ -393,7 +393,7 @@ New PostgreSQL database on the shared `localhost:5432` instance, following AFT c
 
 - **Database:** `mefdb`
 - **Schema:** `mef`
-- **Owner:** `mef_user` (credentials stored in `config/postgres.yaml`, gitignored, following MDC/UDC/RSE/IRA Guard pattern)
+- **Owner:** `mef_user` (credentials stored in `config/postgres.secrets.yaml`, gitignored, following AFT secrets convention — see `~/repos/notes/secrets-conventions.md`)
 
 Tables (full column-level schema in `docs/mef_design_spec.md` §"MEFDB Schema"; audit-table relationships in `mef_audit_model.md`):
 

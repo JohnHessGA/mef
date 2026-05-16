@@ -928,7 +928,7 @@ Dashboards come after the first real runs exist; don't build them up front.
   CLAUDE.md                    # mirrors RSE pattern — working instructions for code assistants
   config/
     mef.yaml                   # cadence, thresholds, LLM provider, email recipients
-    postgres.yaml              # gitignored — mefdb / shdb / overwatch credentials
+    postgres.secrets.yaml      # gitignored — mefdb / shdb / overwatch credentials
   docs/
     README_mef.md              # this spec's companion (build specification)
     mef_design_spec.md         # this document

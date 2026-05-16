@@ -400,7 +400,7 @@ ratios are persistently lopsided after that, iterate the prompt
 | Path                         | What's there                                          | Gitignored? |
 |------------------------------|-------------------------------------------------------|-------------|
 | `config/mef.yaml`            | Cadence, ranker thresholds, freshness, LLM, email     | yes         |
-| `config/postgres.yaml`       | DB credentials for `mefdb`, `shdb`, `overwatch`       | yes         |
+| `config/postgres.secrets.yaml` | DB credentials for `mefdb`, `shdb`, `overwatch`     | yes         |
 | `~/repos/mdc/config/notifications.yaml` | SMTP credentials (read by `email_send.py`) | yes (in MDC) |
 | `cron/mef.cron`              | Cron template (install via `crontab -e`)              | no          |
 | `notes/focus-universe-us-stocks-final.md` | Source-of-truth for the 305 stocks       | no          |

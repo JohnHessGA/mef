@@ -17,6 +17,7 @@ build/
 *.log
 
 # Secrets / local config (do not commit)
-config/postgres.yaml
+# AFT convention: filename includes "secrets". See ~/repos/notes/secrets-conventions.md
+*.secrets.yaml
 config/mef.yaml
 .env

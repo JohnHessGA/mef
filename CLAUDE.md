@@ -55,7 +55,7 @@ These are load-bearing. Stop and ask before crossing any of them.
   - `mefdb` — MEF's own database (schema `mef`, owner `mef_user`) — **not yet created**
   - `shdb` — primary data source (read-only, same PG instance)
   - `overwatch` — telemetry (fail-silent writes)
-- **Secrets:** `config/postgres.yaml` (gitignored) with `mefdb`, `shdb`, `overwatch` sections; env-var fallback via `MEF_MEFDB_PASSWORD`.
+- **Secrets:** `config/postgres.secrets.yaml` (gitignored) with `mefdb`, `shdb`, `overwatch` sections. No env-var fallback for passwords. See `~/repos/notes/secrets-conventions.md`.
 - **Application config:** `config/mef.yaml` (gitignored).
 - **Data root:** `/mnt/aftdata/` (native ext4 VHDX). MEF generated artifacts (if any) live under `/mnt/aftdata/mef/`.
 - **Logs:** `/mnt/aftdata/logs/mef/`.

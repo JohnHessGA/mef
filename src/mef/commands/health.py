@@ -41,7 +41,7 @@ def _check(label: str, check_fn) -> bool:
 def _config_check() -> str:
     load_postgres_config()
     load_app_config()
-    return "postgres.yaml + mef.yaml loaded"
+    return "postgres.secrets.yaml + mef.yaml loaded"
 
 
 def _mefdb_ping() -> str:

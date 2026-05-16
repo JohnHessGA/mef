@@ -9,10 +9,9 @@ Target shape (AFT style — bare verbs, no required flags):
     mef universe    show the 305-stock + 20-ETF universe
 
 The following subcommands are *deprecated* and pending removal in a
-future cleanup. They still work for the moment so existing scripts and
-the operator's muscle memory don't break, but their `--help` output
-is prefixed with "[DEPRECATED]" and stderr emits a one-line notice
-when they run:
+future cleanup. They are hidden from `mef --help` (argparse.SUPPRESS)
+but remain callable so existing scripts and the operator's muscle
+memory don't break. A one-line stderr notice fires when they run:
 
     init-db, report, recommendations, show, dismiss, import-positions,
     score, rejections, gate-audit, tag, link-trade, universe load
@@ -25,6 +24,21 @@ from __future__ import annotations
 
 import argparse
 import sys
+
+
+class _FullHelpArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser that prints full help on error.
+
+    Default argparse prints only the usage line plus the error message.
+    AFT convention is to print the complete help body so the operator
+    immediately sees the supported commands when they mistype. `-h` /
+    `--help` behavior is unchanged.
+    """
+
+    def error(self, message):  # type: ignore[override]
+        self.print_help(sys.stderr)
+        sys.stderr.write(f"\nerror: {message}\n")
+        sys.exit(2)
 
 
 DEPRECATED_NOTE = (
@@ -97,7 +111,7 @@ def _add_universe(sub: argparse._SubParsersAction) -> None:
 def _add_init_db(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "init-db",
-        help="[DEPRECATED] Apply MEFDB migrations. Use psql + sql/mefdb/*.sql instead.",
+        help=argparse.SUPPRESS,
     )
     p.set_defaults(func=_deprecated("init-db", _run_init_db))
 
@@ -105,7 +119,7 @@ def _add_init_db(sub: argparse._SubParsersAction) -> None:
 def _add_recommendations(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "recommendations",
-        help="[DEPRECATED] Historical-rec list. Use `mef status` for current recommendations.",
+        help=argparse.SUPPRESS,
     )
     p.add_argument("--state")
     p.add_argument("--all", action="store_true")
@@ -118,7 +132,7 @@ def _add_recommendations(sub: argparse._SubParsersAction) -> None:
 def _add_show(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "show",
-        help="[DEPRECATED] Show full detail on a recommendation.",
+        help=argparse.SUPPRESS,
     )
     p.add_argument("uid")
     p.set_defaults(func=_deprecated("show", _run_show))
@@ -127,7 +141,7 @@ def _add_show(sub: argparse._SubParsersAction) -> None:
 def _add_dismiss(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "dismiss",
-        help="[DEPRECATED] Mark a proposed recommendation as not-implemented.",
+        help=argparse.SUPPRESS,
     )
     p.add_argument("rec_uid")
     p.add_argument("--note")
@@ -137,7 +151,7 @@ def _add_dismiss(sub: argparse._SubParsersAction) -> None:
 def _add_import_positions(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "import-positions",
-        help="[DEPRECATED] Ingest a Fidelity Positions CSV. MEF will read PHDB instead.",
+        help=argparse.SUPPRESS,
     )
     p.add_argument("csv_path")
     p.set_defaults(func=_deprecated("import-positions", _run_import_positions))
@@ -146,7 +160,7 @@ def _add_import_positions(sub: argparse._SubParsersAction) -> None:
 def _add_score(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "score",
-        help="[DEPRECATED] Refresh scoring on closed recommendations.",
+        help=argparse.SUPPRESS,
     )
     p.set_defaults(func=_deprecated("score", _run_score))
 
@@ -154,7 +168,7 @@ def _add_score(sub: argparse._SubParsersAction) -> None:
 def _add_rejections(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "rejections",
-        help="[DEPRECATED] LLM-gate debugging.",
+        help=argparse.SUPPRESS,
     )
     p.add_argument("--symbol")
     p.add_argument("--since")
@@ -165,7 +179,7 @@ def _add_rejections(sub: argparse._SubParsersAction) -> None:
 def _add_gate_audit(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "gate-audit",
-        help="[DEPRECATED] LLM-gate outcome comparison.",
+        help=argparse.SUPPRESS,
     )
     p.set_defaults(func=_deprecated("gate-audit", _run_gate_audit))
 
@@ -173,7 +187,7 @@ def _add_gate_audit(sub: argparse._SubParsersAction) -> None:
 def _add_tag(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "tag",
-        help="[DEPRECATED] Override the inferred activation provenance on a recommendation.",
+        help=argparse.SUPPRESS,
     )
     p.add_argument("rec_uid")
     p.add_argument(
@@ -187,7 +201,7 @@ def _add_tag(sub: argparse._SubParsersAction) -> None:
 def _add_link_trade(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "link-trade",
-        help="[DEPRECATED] Record actual buy/sell on a scored recommendation.",
+        help=argparse.SUPPRESS,
     )
     p.add_argument("rec_uid")
     p.add_argument("--qty",        required=True, type=float)
@@ -201,7 +215,7 @@ def _add_link_trade(sub: argparse._SubParsersAction) -> None:
 def _add_report(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "report",
-        help="[DEPRECATED] Render the email body. Use `mef status` for current recs.",
+        help=argparse.SUPPRESS,
     )
     p.add_argument(
         "--when",
@@ -302,11 +316,17 @@ def _run_report(args) -> int:
 # ───────────────────────────── parser wiring ─────────────────────────────
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _FullHelpArgumentParser(
         prog="mef",
         description="Muse Engine Forecaster — daily forecasting and recommendation tool.",
     )
-    sub = parser.add_subparsers(dest="command")
+    # metavar replaces the auto-generated `{status,...,init-db,...}` listing
+    # in the usage line so the SUPPRESSed deprecated subcommands don't leak.
+    sub = parser.add_subparsers(
+        dest="command",
+        parser_class=_FullHelpArgumentParser,
+        metavar="{status,run,health,universe}",
+    )
 
     # Active commands
     _add_status(sub)
@@ -314,7 +334,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_health(sub)
     _add_universe(sub)
 
-    # Deprecated commands (still parseable, marked in --help)
+    # Deprecated commands (kept callable, hidden from help via SUPPRESS)
     _add_init_db(sub)
     _add_recommendations(sub)
     _add_show(sub)
@@ -327,6 +347,11 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_link_trade(sub)
     _add_report(sub)
 
+    # Filter the help body: argparse renders `help=SUPPRESS` subparsers as
+    # literal `==SUPPRESS==` lines. Remove those pseudo-actions so the help
+    # body shows only the active subcommands. (Same trick as CCW/CIA/JRA.)
+    sub._choices_actions = [a for a in sub._choices_actions if a.help is not argparse.SUPPRESS]
+
     return parser
 
 
@@ -334,8 +359,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     if not getattr(args, "command", None):
-        parser.print_help()
-        return 0
+        # Bare `mef` → `mef status` (AFT convention: every tool's default
+        # human-facing view is its status report).
+        args = parser.parse_args(["status"])
     return args.func(args)
 
 

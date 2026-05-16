@@ -2,11 +2,13 @@
 
 Loads two YAML files from the `config/` directory at the repo root:
 
-- `config/postgres.yaml` — DB credentials for mefdb, shdb, overwatch.
-- `config/mef.yaml`      — application settings (cadence, ranker, llm, email, ...).
+- `config/postgres.secrets.yaml` — DB credentials for mefdb, shdb, overwatch.
+- `config/mef.yaml`              — application settings (cadence, ranker, llm, email, ...).
 
-Env-var fallbacks apply to a handful of values where runtime overrides
-are useful (log level, LLM binary path, shared password).
+Credentials live exclusively in the YAML file. No env-var fallback for
+passwords — see `~/repos/notes/secrets-conventions.md`. ``MEF_LOG_LEVEL``
+and ``MEF_CLAUDE_PATH`` remain as runtime overrides for non-credential
+values.
 """
 
 from __future__ import annotations
@@ -41,16 +43,13 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def load_postgres_config() -> dict[str, dict[str, Any]]:
-    """Return the parsed postgres.yaml as a dict keyed by db-role section."""
-    cfg = _load_yaml(_repo_root() / "config" / "postgres.yaml")
+    """Return the parsed postgres.secrets.yaml as a dict keyed by db-role section."""
+    cfg = _load_yaml(_repo_root() / "config" / "postgres.secrets.yaml")
     for required in ("mefdb", "shdb", "overwatch"):
         if required not in cfg:
             raise ConfigError(
-                f"config/postgres.yaml missing required section: {required}"
+                f"config/postgres.secrets.yaml missing required section: {required}"
             )
-    if pw := os.environ.get("MEF_MEFDB_PASSWORD"):
-        for section in ("mefdb", "shdb", "overwatch"):
-            cfg[section]["password"] = pw
     return cfg
 
 
