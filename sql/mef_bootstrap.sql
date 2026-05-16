@@ -72,7 +72,7 @@ GRANT USAGE ON SCHEMA ow TO mef_user;
 \echo 'Granted CONNECT + USAGE ow to mef_user on: overwatch'
 \echo ''
 \echo 'Next steps (run from ~/repos/mef/ as your user, not postgres):'
-\echo '  1. python3 -m venv venv && source venv/bin/activate'
+\echo '  1. python3 -m venv .venv && source .venv/bin/activate'
 \echo '  2. pip install -e .'
 \echo '  3. mef status      # smoke test — all connections should be green'
 \echo '  4. mef init-db     # creates schema mef and all MEFDB tables'

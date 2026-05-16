@@ -20,5 +20,5 @@
 
 CRON_TZ=America/New_York
 
-0  7 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run --when premarket  >> /mnt/aftdata/logs/mef/cron.log 2>&1
-45 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run --when postmarket >> /mnt/aftdata/logs/mef/cron.log 2>&1
+0  7 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/.venv/bin/mef run --when premarket  >> /mnt/aftdata/logs/mef/cron.log 2>&1
+45 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/.venv/bin/mef run --when postmarket >> /mnt/aftdata/logs/mef/cron.log 2>&1
