@@ -12,8 +12,8 @@ but does not send email. The operator's daily front door is `mef status`
 ```
 CRON_TZ=America/New_York
 
-0  7 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run --when premarket  >> /mnt/aftdata/logs/mef/cron.log 2>&1
-45 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run --when postmarket >> /mnt/aftdata/logs/mef/cron.log 2>&1
+0  7 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/.venv/bin/mef run --when premarket  >> /mnt/aftdata/logs/mef/cron.log 2>&1
+45 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/.venv/bin/mef run --when postmarket >> /mnt/aftdata/logs/mef/cron.log 2>&1
 ```
 
 | Time (ET) | Days    | Command                       | Outcome |
@@ -29,8 +29,8 @@ data on either fire.
 ### Recommended next form (when cron is updated)
 
 ```
-0  7 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run >> /mnt/aftdata/logs/mef/cron.log 2>&1
-45 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/venv/bin/mef run >> /mnt/aftdata/logs/mef/cron.log 2>&1
+0  7 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/.venv/bin/mef run >> /mnt/aftdata/logs/mef/cron.log 2>&1
+45 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/.venv/bin/mef run >> /mnt/aftdata/logs/mef/cron.log 2>&1
 ```
 
 Both lines call the `mef` CLI directly. The only "wrapper" plumbing is
@@ -77,15 +77,15 @@ audit trail.
 
 ```bash
 cd /home/johnh/repos/mef
-venv/bin/mef run                  # writes to MEFDB, no email
-venv/bin/mef status               # show what it produced
+.venv/bin/mef run                  # writes to MEFDB, no email
+.venv/bin/mef status               # show what it produced
 ```
 
 Watch for any errors in the run output. To verify SMTP delivery once,
 run:
 
 ```bash
-venv/bin/mef run --send-email
+.venv/bin/mef run --send-email
 ```
 
 Check the recipient's inbox for "MEF post-market report — YYYY-MM-DD …".

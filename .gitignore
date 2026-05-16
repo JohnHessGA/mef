@@ -7,9 +7,6 @@ __pycache__/
 dist/
 build/
 .venv/
-venv/
-.venv-py312-bak/
-venv-py312-bak/
 
 # OS / editor
 .DS_Store
