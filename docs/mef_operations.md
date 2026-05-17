@@ -355,7 +355,7 @@ Every **quarter** (parked until ~3 months of data exists, milestone 17):
    ```
 2. Check Overwatch for the run row:
    ```bash
-   PGPASSWORD=mef_local_2026 psql -h localhost -U mef_user -d overwatch \
+   PGPASSWORD="$(grep -A1 overwatch: config/postgres.secrets.yaml | grep password | awk '{print $2}' | tr -d '"')" psql -h localhost -U mef_user -d overwatch \
      -c "SELECT * FROM ow.mef_run ORDER BY started_at DESC LIMIT 5;"
    ```
 3. Inspect what the latest run actually produced:
