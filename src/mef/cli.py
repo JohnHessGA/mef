@@ -48,6 +48,31 @@ DEPRECATED_NOTE = (
 
 # ───────────────────────────── subcommand defs ─────────────────────────────
 
+def _add_premarket_run(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "premarket-run",
+        help="Run the MEF pipeline for the premarket window + send the daily email.",
+        description=(
+            "Premarket cron entry point. Equivalent to "
+            "`mef run --when premarket --send-email` but the new canonical "
+            "name. Use this in cron lines from Phase 5 onward."
+        ),
+    )
+    p.set_defaults(func=_run_mef_run, when="premarket", send_email=True)
+
+
+def _add_postmarket_run(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "postmarket-run",
+        help="Run the MEF pipeline for the postmarket window + send the daily email.",
+        description=(
+            "Postmarket cron entry point. Equivalent to "
+            "`mef run --when postmarket --send-email`."
+        ),
+    )
+    p.set_defaults(func=_run_mef_run, when="postmarket", send_email=True)
+
+
 def _add_run(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "run",
@@ -325,12 +350,14 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(
         dest="command",
         parser_class=_FullHelpArgumentParser,
-        metavar="{status,run,health,universe}",
+        metavar="{status,run,premarket-run,postmarket-run,health,universe}",
     )
 
     # Active commands
     _add_status(sub)
     _add_run(sub)
+    _add_premarket_run(sub)
+    _add_postmarket_run(sub)
     _add_health(sub)
     _add_universe(sub)
 
