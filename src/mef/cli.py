@@ -284,6 +284,7 @@ def _run_universe(args) -> int:
 
 
 def _run_mef_run(args) -> int:
+    print("mef is working — typical run takes about 2 minutes", flush=True)
     from mef.commands import run as run_cmd
     return run_cmd.run(args)
 
