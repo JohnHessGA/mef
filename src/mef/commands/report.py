@@ -18,6 +18,7 @@ import sys
 from typing import Any
 
 from mef.db.connection import connect_mefdb
+from mef.dq_guardrails import safe_drawdown
 from mef.email_render import render_daily_email
 from mef.etf_classifier import classify_universe as _classify_etf_universe
 from mef.evidence import pull_latest_evidence
@@ -92,7 +93,10 @@ def _build_idea(rec: dict[str, Any]) -> dict[str, Any]:
     # `needs_pullback` isn't persisted on mef.candidate; infer it from the
     # same rule the ranker uses (drawdown_current > -0.03). Stable as long
     # as the threshold stays in sync with ranker._score_symbol.
-    dd = fjson.get("drawdown_current")
+    # safe_drawdown ensures split-cascade artifact rows (drawdown ≈ -1.0)
+    # don't accidentally satisfy the > -0.03 check — they land as None and
+    # the email's "needs pullback" hint goes silent. See mef.dq_guardrails.
+    dd = safe_drawdown(fjson.get("drawdown_current"))
     needs_pullback = dd is not None and dd > -0.03
     next_earn = fjson.get("next_earnings_date")
     # feature_json stores dates as ISO strings; parse back for the email.

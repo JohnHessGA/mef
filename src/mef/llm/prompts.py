@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from mef.dq_guardrails import format_drawdown
+
 
 ALLOWED_DECISIONS = ("approve", "review", "reject")
 
@@ -259,7 +261,7 @@ def render_candidates_block(candidates: list[dict[str, Any]]) -> str:
             f"{_fmt((fx.get('realized_vol_20d') or 0) / (fx.get('realized_vol_63d') or 1), '{:.2f}') if fx.get('realized_vol_63d') else 'n/a'} "
             f"rs_spy63={_fmt_pct(fx.get('rs_vs_spy_63d'))} "
             f"rs_qqq63={_fmt_pct(fx.get('rs_vs_qqq_63d'))} "
-            f"drawdown={_fmt_pct(fx.get('drawdown_current'))} "
+            f"drawdown={format_drawdown(fx.get('drawdown_current'))} "
             f"vol_z={_fmt(fx.get('volume_z_score'), '{:+.2f}')} "
             f"sector={fx.get('sector') or 'etf'} | "
             f"plan: {c.get('proposed_expression')} "

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 from mef.db.connection import connect_mefdb
+from mef.dq_guardrails import format_drawdown
 
 
 _REC_QUERY = """
@@ -220,5 +221,11 @@ def run(args) -> int:
                     "drawdown_current", "volume_z_score", "sector"):
             if key in feats:
                 val = feats[key]
+                # Render drawdown_current through the suspect-value
+                # guardrail so split-cascade artifacts (≈ -1.0 on micro-
+                # caps with multiple reverse splits) show as "suspect"
+                # instead of a misleading "-100%". See mef.dq_guardrails.
+                if key == "drawdown_current":
+                    val = format_drawdown(val)
                 print(f"  {key:<20} {val}")
     return 0

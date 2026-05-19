@@ -23,6 +23,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from mef.dq_guardrails import safe_drawdown
+
 
 # ──────────────────────────────────────────────────────────────────
 # Public API
@@ -96,7 +98,10 @@ def classify_etf(
     sma_50 = features.get("sma_50")
     sma_200 = features.get("sma_200")
     rsi = features.get("rsi_14")
-    dd = features.get("drawdown_current")          # negative number, -0.05 = 5% off peak
+    # Wrap with safe_drawdown so split-cascade artifacts (drawdown ≈ -1.0
+    # on micro-caps with multiple reverse splits) land as missing rather
+    # than as a real extreme. See mef.dq_guardrails.
+    dd = safe_drawdown(features.get("drawdown_current"))   # negative number, -0.05 = 5% off peak
     ret_63d = features.get("return_63d")
 
     spy_ret_63d = (spy_features or {}).get("return_63d") if spy_features else None

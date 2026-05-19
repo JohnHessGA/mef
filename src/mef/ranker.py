@@ -36,6 +36,7 @@ from datetime import date, timedelta
 from typing import Any, Callable
 
 from mef import eligibility, hazard_overlay
+from mef.dq_guardrails import safe_drawdown
 from mef.evidence import SECTOR_TO_ETF, EvidenceBundle
 
 
@@ -118,7 +119,12 @@ def _score_symbol(symbol: str, row: dict[str, Any], baseline: dict[str, Any]) ->
     rsi = row.get("rsi_14")
     macd_hist = row.get("macd_histogram")
     vol_z = row.get("volume_z_score")
-    drawdown = row.get("drawdown_current")
+    # Wrap drawdown with the suspect-value guardrail so split-cascade
+    # artifacts on names like SMX/WOK/WHLR (drawdown ≈ -1.0 from inflated
+    # peak_252d) land as missing rather than as a real extreme. See
+    # mef.dq_guardrails + ~/repos/udc/docs/peak_252d-investigation-
+    # 2026-05-19.md.
+    drawdown = safe_drawdown(row.get("drawdown_current"))
     above_50 = bool(row.get("trend_above_sma50"))
     above_200 = bool(row.get("trend_above_sma200"))
 
@@ -365,7 +371,8 @@ def _score_mean_rev(symbol: str, row: dict[str, Any], baseline: dict[str, Any]) 
     macd_value = row.get("macd_value")
     macd_signal = row.get("macd_signal")
     return_5d = row.get("return_5d")
-    drawdown = row.get("drawdown_current")
+    # Same guardrail as the trend scorer above — see mef.dq_guardrails.
+    drawdown = safe_drawdown(row.get("drawdown_current"))
     vol_z = row.get("volume_z_score")
     rv20 = row.get("realized_vol_20d")
     rv63 = row.get("realized_vol_63d")
