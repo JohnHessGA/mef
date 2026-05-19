@@ -1,13 +1,9 @@
 # MEF Cron Setup
 
-Two scheduled runs per trading day refresh MEF's recommendations in MEFDB.
+Two scheduled runs per trading day refresh MEF's recommendations in MEFDB and
+send a daily email.
 
-**As of 2026-05-06** the email path is **off by default** — cron writes
-fresh `daily_run` / `candidate` / `recommendation` rows on every fire,
-but does not send email. The operator's daily front door is `mef status`
-(see `mef_operations.md`).
-
-## Entries (current — canonical form)
+## Entries (canonical form)
 
 ```
 CRON_TZ=America/New_York
@@ -18,20 +14,36 @@ CRON_TZ=America/New_York
 
 | Time (ET) | Days    | Command            | Outcome |
 |-----------|---------|--------------------|--------------------------------------|
-| 07:00     | Mon–Fri | `premarket-run`    | Refreshes MEFDB. **No email.**       |
-| 17:45     | Mon–Fri | `postmarket-run`   | Refreshes MEFDB. **No email.**       |
+| 07:00     | Mon–Fri | `premarket-run`    | Refreshes MEFDB. Email sent.         |
+| 17:45     | Mon–Fri | `postmarket-run`   | Refreshes MEFDB. Email sent.         |
 
 `premarket-run` and `postmarket-run` are sugar for `mef run --when X
---send-email`. The subcommands set `send_email=True` at the CLI layer,
-but a runtime gate suppresses the SMTP call — confirmed by
-`mef.daily_run.email_sent_at` being NULL on every run since
-DR-000065 (2026-05-07 07:00). To re-enable, revisit that gate; the
-note above is the canonical "off" reference. The `--when` argument
-on plain `mef run` is informational; the runtime does not branch on it.
+--send-email` — each subcommand sets both `when` and `send_email=True`.
+Plain `mef run` does not send unless `--send-email` is passed; its
+`--when` flag is informational and the runtime does not branch on it.
 
 `scripts/cron_run.sh` is pure plumbing (sets working dir, activates the
 venv, `exec`s `mef "$@"`) and matches the AFT-wide cron convention
 (see `~/repos/CLAUDE.md` → Scheduling).
+
+### History note: `email_sent_at` NULL gap (2026-05-07 onward)
+
+`mef.daily_run.email_sent_at` is NULL on every run since DR-000065
+(2026-05-07 07:00). This is **not** a runtime gate — it's two separate
+causes layered together:
+
+1. DR-000065 itself was a `mef run --when premarket` cron line that
+   pre-dated commit `c97d5e0`, which introduced the `premarket-run` /
+   `postmarket-run` subcommands. The default for plain `mef run` had
+   been flipped to opt-in `--send-email` in `6a5011a` (2026-05-06), so
+   that run correctly skipped email.
+2. The cron line was later updated to `premarket-run` (would have
+   emailed), but **the entire app-stream cron block was paused around
+   2026-05-18 for perf-work and has not been restored**. The handful
+   of rows DR-000066–069 are manual ad-hoc invocations, not cron.
+
+When cron is restored from `cron/mef.cron`, both `premarket-run` and
+`postmarket-run` will populate `email_sent_at` on each fire.
 
 ## Install
 
