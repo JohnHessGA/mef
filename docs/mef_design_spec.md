@@ -188,6 +188,20 @@ and for sizing pullback entry zones (`close − 2·ATR`).
 **Position vs. peak** — `drawdown_current` (distance from 252d high).
 Anchors the `needs_pullback` flag at `drawdown > -0.03`.
 
+*Dirty-drawdown guardrail (shipped 2026-05-19).* All Python sites that
+**interpret** `drawdown_current` route the value through
+`mef/dq_guardrails.py::safe_drawdown` first. Values `≤ -0.99` come back
+as `None` and are treated as missing — the symbol falls through any
+drawdown-driven rule rather than scoring as a "perfectly oversold"
+candidate. The threshold catches the
+reverse-split-cascade artifact in `shdb.stock_volatility_1d.peak_252d`
+(see `~/repos/udc/docs/peak_252d-investigation-2026-05-19.md`) where
+historical CSF-inflated peaks make `drawdown_current ≈ -1.0`. Display
+sites (`commands/show.py`, LLM prompts) use `format_drawdown` and
+render `"suspect"` rather than a misleading `-99.8%`. Raw SQL projection
+sites (`mef/evidence.py`) deliberately keep the value intact —
+guardrails apply at interpretation, not at the read.
+
 **Volume** — `volume_z_score`.
 
 **Relative strength (equities only)** — `rs_vs_spy_20d`,
