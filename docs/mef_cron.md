@@ -7,36 +7,31 @@ fresh `daily_run` / `candidate` / `recommendation` rows on every fire,
 but does not send email. The operator's daily front door is `mef status`
 (see `mef_operations.md`).
 
-## Entries (current — back-compat form)
+## Entries (current — canonical form)
 
 ```
 CRON_TZ=America/New_York
 
-0  7 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/.venv/bin/mef run --when premarket  >> /mnt/aftdata/logs/mef/cron.log 2>&1
-45 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/.venv/bin/mef run --when postmarket >> /mnt/aftdata/logs/mef/cron.log 2>&1
+0  7 * * 1-5  /home/johnh/repos/mef/scripts/cron_run.sh premarket-run   >> /mnt/aftdata/logs/mef/cron.log 2>&1
+45 17 * * 1-5 /home/johnh/repos/mef/scripts/cron_run.sh postmarket-run  >> /mnt/aftdata/logs/mef/cron.log 2>&1
 ```
 
-| Time (ET) | Days    | Command                       | Outcome |
-|-----------|---------|-------------------------------|--------------------------------------|
-| 07:00     | Mon–Fri | `mef run --when premarket`    | Refreshes MEFDB. **No email.**       |
-| 17:45     | Mon–Fri | `mef run --when postmarket`   | Refreshes MEFDB. **No email.**       |
+| Time (ET) | Days    | Command            | Outcome |
+|-----------|---------|--------------------|--------------------------------------|
+| 07:00     | Mon–Fri | `premarket-run`    | Refreshes MEFDB. **No email.**       |
+| 17:45     | Mon–Fri | `postmarket-run`   | Refreshes MEFDB. **No email.**       |
 
-The `--when` flag is hidden in `mef --help` and accepted only for cron
-back-compat. The runtime no longer treats premarket and postmarket
-differently — `mef run` produces the best slate it can from current
-data on either fire.
+`premarket-run` and `postmarket-run` are sugar for `mef run --when X
+--send-email`. The subcommands set `send_email=True` at the CLI layer,
+but a runtime gate suppresses the SMTP call — confirmed by
+`mef.daily_run.email_sent_at` being NULL on every run since
+DR-000065 (2026-05-07 07:00). To re-enable, revisit that gate; the
+note above is the canonical "off" reference. The `--when` argument
+on plain `mef run` is informational; the runtime does not branch on it.
 
-### Recommended next form (when cron is updated)
-
-```
-0  7 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/.venv/bin/mef run >> /mnt/aftdata/logs/mef/cron.log 2>&1
-45 17 * * 1-5 cd /home/johnh/repos/mef && /home/johnh/repos/mef/.venv/bin/mef run >> /mnt/aftdata/logs/mef/cron.log 2>&1
-```
-
-Both lines call the `mef` CLI directly. The only "wrapper" plumbing is
-`cd` for working-directory consistency, the venv-relative binary path,
-and `>> log 2>&1` for log redirection — matching the AFT-wide
-convention (see `~/repos/CLAUDE.md` → Scheduling).
+`scripts/cron_run.sh` is pure plumbing (sets working dir, activates the
+venv, `exec`s `mef "$@"`) and matches the AFT-wide cron convention
+(see `~/repos/CLAUDE.md` → Scheduling).
 
 ## Install
 

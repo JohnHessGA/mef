@@ -129,7 +129,7 @@ Same file the user already downloads for IRA Guard. MEF accepts an arbitrary pat
 ## 5. Daily Run Pipeline
 
 ```
-mef run --when {premarket|postmarket}
+mef {premarket-run|postmarket-run}
 
   0. Acquire run lock (PID file + ow.mef_lock row, fail-fast on stale lock)
   1. Open daily_run row (status=running, when, intent)
@@ -1038,7 +1038,7 @@ DB-backed tests against a scratch MEFDB:
 
 Real CLI tests:
 
-- `mef run --when premarket` end-to-end on a dev schema
+- `mef premarket-run` end-to-end on a dev schema
 - `mef dismiss` / `mef import-positions` / `mef show` against real rows
 
 `pytest -q` runs fast; add tests for new pure logic as it lands.
@@ -1075,7 +1075,7 @@ The smallest thing worth calling v1:
 1. `mef status` returns.
 2. `mef universe load` populates the 305+20.
 3. `mef import-positions` ingests a real Fidelity CSV.
-4. `mef run --when postmarket` runs end-to-end against SHDB with a crude ranker, produces zero-or-more recommendations, logs an LLM trace, and sends a real email.
+4. `mef postmarket-run` runs end-to-end against SHDB with a crude ranker, produces zero-or-more recommendations, logs an LLM trace, and sends a real email.
 5. `mef dismiss <rec-id>` works. Expiration and auto-activation work on the next run.
 6. `mef score` runs over whatever has closed.
 7. Two cron entries fire pre- and post-market on weekdays.

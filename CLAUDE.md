@@ -64,7 +64,8 @@ These are load-bearing. Stop and ask before crossing any of them.
 
 | Command | Purpose |
 |---|---|
-| `mef run --when {premarket\|postmarket}` | Execute one scheduled run (cron entry point) |
+| `mef premarket-run` / `mef postmarket-run` | Execute one scheduled run with email enabled (cron entry points). Sugar for `mef run --when X --send-email`. |
+| `mef run [--when {premarket\|postmarket}] [--send-email]` | Run the pipeline manually. `--when` is informational only; the runtime does not branch on it. |
 | `mef status` | Environment, DB connectivity, data freshness, last run summary |
 | `mef init-db` | Apply MEFDB migrations (idempotent) |
 | `mef universe [load]` | Show universe; `load` syncs tables from `notes/` files |
@@ -73,7 +74,7 @@ These are load-bearing. Stop and ask before crossing any of them.
 | `mef dismiss <rec-id>` | Mark a proposed recommendation as not-implemented |
 | `mef import-positions <csv>` | Ingest a Fidelity Portfolio Positions CSV |
 | `mef score` | Re-evaluate closed recommendations and refresh scoring |
-| `mef report --when {premarket\|postmarket}` | Render the email body without sending |
+| `mef report --when {premarket\|postmarket}` | Render the email body without sending (deprecated; emits a deprecation notice). |
 
 Currently implemented: `status`, `init-db`. The rest stub out.
 
