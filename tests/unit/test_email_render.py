@@ -22,7 +22,7 @@ def test_render_empty_is_no_new_trades():
     )
     assert email.subject.startswith("MEF pre-market report")
     assert "2026-04-19" in email.subject
-    assert "No new trades today." in email.body
+    assert "No approved new stock ideas today." in email.body
     assert "305 stocks, 20 ETFs" in email.body
     assert "DR-000001" in email.body
 
@@ -58,4 +58,4 @@ def test_render_new_ideas_listed():
     assert "New ideas (2):" in email.body
     assert "AAPL" in email.body and "SPY" in email.body
     assert "Above 50d" in email.body
-    assert "No new trades today." not in email.body
+    assert "No approved new stock ideas today." not in email.body

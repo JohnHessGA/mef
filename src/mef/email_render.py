@@ -400,6 +400,7 @@ def render_daily_email(
     etfs_in_universe: int,
     new_ideas: list[dict[str, Any]] | None = None,
     review_ideas: list[dict[str, Any]] | None = None,
+    unavailable_ideas: list[dict[str, Any]] | None = None,
     active_updates: list[dict[str, Any]] | None = None,
     recent_score_summary: str | None = None,
     llm_gate_available: bool = True,
@@ -414,6 +415,7 @@ def render_daily_email(
 ) -> RenderedEmail:
     new_ideas = new_ideas or []
     review_ideas = review_ideas or []
+    unavailable_ideas = unavailable_ideas or []
     active_updates = active_updates or []
     upcoming_macro_events = upcoming_macro_events or []
     per_engine_top = per_engine_top or {}
@@ -455,6 +457,12 @@ def render_daily_email(
             f"⚠ LLM gate was unavailable for this run{reason_suffix} — "
             "ideas below were not reviewed."
         )
+        if unavailable_ideas:
+            lines.append(
+                "   Deterministic-engine candidates are listed under "
+                "'Algorithmic candidates not fully reviewed' — treat as raw "
+                "signal, not approved actionable ideas."
+            )
         lines.append("")
 
     # Top-of-email summary — skipped on staleness-aborted runs where
@@ -473,7 +481,7 @@ def render_daily_email(
 
     lines.append(f"New ideas ({len(new_ideas)}):")
     if not new_ideas:
-        lines.append("  No new trades today.")
+        lines.append("  No approved new stock ideas today.")
     else:
         for idx, idea in enumerate(new_ideas, start=1):
             lines.extend(_idea_lines(idx, idea))
@@ -488,6 +496,25 @@ def render_daily_email(
             f"for human attention, not auto-ship:"
         )
         for idx, idea in enumerate(review_ideas, start=1):
+            lines.extend(_idea_lines(idx, idea))
+
+    # Unavailable: deterministic-engine candidates that never got an LLM
+    # disposition (gate timed out / failed / returned unparseable JSON).
+    # Rendered in their own subsection — explicitly NOT "New ideas" — so
+    # an LLM outage is never visually indistinguishable from an approved
+    # actionable idea. Audit trail still lives on candidate / recommendation
+    # / llm_trace; this is presentation only.
+    if unavailable_ideas:
+        lines.append("")
+        lines.append(
+            f"Algorithmic candidates not fully reviewed ({len(unavailable_ideas)}) — "
+            f"LLM gate unavailable:"
+        )
+        lines.append(
+            "  Produced by the deterministic ranker but not reviewed by the "
+            "LLM gate. Treat as raw signal, not approved actionable ideas."
+        )
+        for idx, idea in enumerate(unavailable_ideas, start=1):
             lines.extend(_idea_lines(idx, idea))
 
     # Quiet footer: only rejected count now. Review items are rendered

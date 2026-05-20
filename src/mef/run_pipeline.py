@@ -311,8 +311,14 @@ def _insert_recommendations(
     Rejected ideas are NOT recorded as recommendations — their gate decision
     lives on mef.candidate only. Approved + review + unavailable ALL become
     recommendations so they can flow through the lifecycle (auto-activate
-    on matching holding, get paper-scored, etc.). Email filtering happens
-    downstream via the ``should_email`` flag.
+    on matching holding, get paper-scored, etc.).
+
+    Email rendering is presentation-only and decided downstream. Approved
+    rows carry ``should_email=True`` and ship as actionable "New ideas".
+    Review and unavailable rows are routed to their own dedicated email
+    subsections (not New ideas), so an LLM outage is never presented as
+    an approved actionable idea — the candidate row + llm_trace remain
+    the full audit trail.
 
     ``engine_scores`` (optional) maps symbol → {engine: conviction}. When
     provided, the recommendation's ``source_engines`` field is populated
@@ -372,11 +378,13 @@ def _insert_recommendations(
                 ),
             )
             pnl = _estimated_pnl(cand)
-            # Email rule: approve + unavailable land in the "New ideas"
-            # section. Review-tagged items are selected separately by the
-            # pipeline and render in the "Held for review" section.
-            # Rejected ideas never become recommendations.
-            should_email = decision.decision in ("approve", "unavailable")
+            # Email rule: only LLM-approved ideas land in the "New ideas"
+            # section. Review-tagged items render in "Held for review";
+            # unavailable items render in their own "Algorithmic candidates
+            # not fully reviewed" subsection (so an LLM outage is not
+            # presented as an approved actionable idea). Rejected ideas
+            # never become recommendations.
+            should_email = decision.decision == "approve"
             emitted_rows.append({
                 "rec_uid":           uid,
                 "symbol":            cand.symbol,
@@ -764,12 +772,18 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 ),
             )
 
-            # Email shows approved (+ unavailable, so an LLM outage doesn't
-            # silence MEF) as "New ideas", and review-tagged recs in a
-            # separate "Held for review" section with the LLM reasoning
-            # visible so the user can decide whether to act manually.
+            # Email layout: approved → "New ideas"; review-tagged →
+            # "Held for review"; unavailable (LLM gate failed) → its own
+            # "Algorithmic candidates not fully reviewed" subsection.
+            # Keeping unavailable out of New ideas means an LLM outage is
+            # never presented as an approved actionable idea — but the
+            # candidate/recommendation rows + llm_trace still persist for
+            # full audit and lifecycle flow.
             email_ideas = [r for r in emitted_rows if r.get("should_email")]
             review_ideas = [r for r in emitted_rows if r.get("llm_gate") == "review"]
+            unavailable_ideas = [
+                r for r in emitted_rows if r.get("llm_gate") == "unavailable"
+            ]
             # Per-engine top-N rendered for the side-by-side email
             # section. Already computed upstream; just reformat into
             # the email-friendly dict shape.
@@ -803,6 +817,7 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 etfs_in_universe=counts["etfs"],
                 new_ideas=email_ideas,
                 review_ideas=review_ideas,
+                unavailable_ideas=unavailable_ideas,
                 active_updates=[],
                 llm_gate_available=gate.available,
                 llm_gate_rejected=len(gate.rejected),

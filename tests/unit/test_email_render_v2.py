@@ -86,12 +86,17 @@ def test_price_check_note_omitted_when_absent():
     assert "Price check:" not in email.body
 
 
-def test_not_reviewed_footer_when_gate_unavailable_wholesale():
+def test_not_reviewed_banner_when_gate_unavailable_wholesale():
+    # Unavailable ideas now route through the dedicated `unavailable_ideas`
+    # bucket (not `new_ideas`), so an LLM outage is never presented as an
+    # approved actionable idea. The banner still fires, and each rendered
+    # idea still carries the inline "Not reviewed by LLM" marker.
     email = render_daily_email(
         when_kind="premarket", intent="today_after_10am",
         run_uid="DR-2", started_at=_time(),
         stocks_in_universe=305, etfs_in_universe=15,
-        new_ideas=[_idea(llm_gate="unavailable")],
+        new_ideas=[],
+        unavailable_ideas=[_idea(llm_gate="unavailable")],
         llm_gate_available=False,
     )
     assert "LLM gate was unavailable" in email.body
@@ -103,7 +108,8 @@ def test_unavailable_banner_includes_timeout_reason():
         when_kind="premarket", intent="today_after_10am",
         run_uid="DR-TO", started_at=_time(),
         stocks_in_universe=305, etfs_in_universe=15,
-        new_ideas=[_idea(llm_gate="unavailable")],
+        new_ideas=[],
+        unavailable_ideas=[_idea(llm_gate="unavailable")],
         llm_gate_available=False,
         llm_gate_unavailable_kind="timeout",
     )
@@ -115,7 +121,8 @@ def test_unavailable_banner_includes_parse_reason():
         when_kind="premarket", intent="today_after_10am",
         run_uid="DR-PE", started_at=_time(),
         stocks_in_universe=305, etfs_in_universe=15,
-        new_ideas=[_idea(llm_gate="unavailable")],
+        new_ideas=[],
+        unavailable_ideas=[_idea(llm_gate="unavailable")],
         llm_gate_available=False,
         llm_gate_unavailable_kind="parse",
     )
@@ -311,7 +318,8 @@ def test_unavailable_banner_omits_reason_when_kind_unknown():
         when_kind="premarket", intent="today_after_10am",
         run_uid="DR-X", started_at=_time(),
         stocks_in_universe=305, etfs_in_universe=15,
-        new_ideas=[_idea(llm_gate="unavailable")],
+        new_ideas=[],
+        unavailable_ideas=[_idea(llm_gate="unavailable")],
         llm_gate_available=False,
     )
     assert "LLM gate was unavailable for this run — ideas below were not reviewed." in email.body
@@ -326,7 +334,7 @@ def test_rejected_counter_when_all_rejected():
         new_ideas=[],
         llm_gate_rejected=5,
     )
-    assert "No new trades today." in email.body
+    assert "No approved new stock ideas today." in email.body
     assert "5 rejected" in email.body
 
 
