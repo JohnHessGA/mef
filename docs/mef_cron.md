@@ -8,14 +8,20 @@ send a daily email.
 ```
 CRON_TZ=America/New_York
 
-0  7 * * 1-5  /home/johnh/repos/mef/scripts/cron_run.sh premarket-run   >> /mnt/aftdata/logs/mef/cron.log 2>&1
+0 10 * * 1-5  /home/johnh/repos/mef/scripts/cron_run.sh premarket-run   >> /mnt/aftdata/logs/mef/cron.log 2>&1
 45 17 * * 1-5 /home/johnh/repos/mef/scripts/cron_run.sh postmarket-run  >> /mnt/aftdata/logs/mef/cron.log 2>&1
 ```
 
 | Time (ET) | Days    | Command            | Outcome |
 |-----------|---------|--------------------|--------------------------------------|
-| 07:00     | Mon–Fri | `premarket-run`    | Refreshes MEFDB. Email sent.         |
-| 17:45     | Mon–Fri | `postmarket-run`   | Refreshes MEFDB. Email sent.         |
+| 10:00     | Mon–Fri | `premarket-run`    | Refreshes MEFDB. Email sent. Fires after IRA Guard's 09:45 ET run. |
+| 17:45     | Mon–Fri | `postmarket-run`   | Refreshes MEFDB. Email sent. Fires after IRA Guard's 17:30 ET run. |
+
+Both MEF runs are deliberately scheduled **after** the corresponding IRA
+Guard runs so MEF sees the latest defensive state before generating
+recommendations. Note that 10:00 ET is after the 09:30 ET market open —
+the `premarket-run` subcommand name is historical and the runtime does
+not branch on `--when`, so the label is a misnomer but harmless.
 
 `premarket-run` and `postmarket-run` are sugar for `mef run --when X
 --send-email` — each subcommand sets both `when` and `send_email=True`.
@@ -26,11 +32,11 @@ Plain `mef run` does not send unless `--send-email` is passed; its
 venv, `exec`s `mef "$@"`) and matches the AFT-wide cron convention
 (see `~/repos/CLAUDE.md` → Scheduling).
 
-### History note: `email_sent_at` NULL gap (2026-05-07 onward)
+### History note: `email_sent_at` NULL gap (2026-05-07 → 2026-05-20)
 
-`mef.daily_run.email_sent_at` is NULL on every run since DR-000065
-(2026-05-07 07:00). This is **not** a runtime gate — it's two separate
-causes layered together:
+`mef.daily_run.email_sent_at` was NULL on every run from DR-000065
+(2026-05-07 07:00) through the cron restoration on 2026-05-20. This was
+**not** a runtime gate — it was two separate causes layered together:
 
 1. DR-000065 itself was a `mef run --when premarket` cron line that
    pre-dated commit `c97d5e0`, which introduced the `premarket-run` /
@@ -38,12 +44,14 @@ causes layered together:
    been flipped to opt-in `--send-email` in `6a5011a` (2026-05-06), so
    that run correctly skipped email.
 2. The cron line was later updated to `premarket-run` (would have
-   emailed), but **the entire app-stream cron block was paused around
-   2026-05-18 for perf-work and has not been restored**. The handful
-   of rows DR-000066–069 are manual ad-hoc invocations, not cron.
+   emailed), but the entire app-stream cron block was paused around
+   2026-05-18 for perf-work. The handful of rows DR-000066–069 are
+   manual ad-hoc invocations from that paused window, not cron.
 
-When cron is restored from `cron/mef.cron`, both `premarket-run` and
-`postmarket-run` will populate `email_sent_at` on each fire.
+Cron was restored on 2026-05-20 with the premarket run shifted from
+07:00 to 10:00 ET so both MEF runs fire after IRA Guard. From that
+point on, `premarket-run` and `postmarket-run` both populate
+`email_sent_at` on each fire.
 
 ## Install
 

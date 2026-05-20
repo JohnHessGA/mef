@@ -3,10 +3,15 @@
 
 CRON_TZ=America/New_York
 
-# Two scheduled runs per trading day.
-#   07:00 ET pre-market  — recommendations for today's >=10:00 ET execution
-#   17:45 ET post-market — recommendations for the next trading day
-#                          (offset from 17:30 to avoid notify.py collision
-#                          with IRA Guard's 17:30 evening run)
-0  7 * * 1-5  /home/johnh/repos/mef/scripts/cron_run.sh premarket-run   >> /mnt/aftdata/logs/mef/cron.log 2>&1
+# Two scheduled runs per trading day. Both fire AFTER IRA Guard so MEF
+# sees the latest defensive state before generating recommendations.
+#   10:00 ET morning      — invoked as `premarket-run` (the subcommand
+#                            name is historical; runtime is identical to
+#                            `mef run --when premarket --send-email`).
+#                            Fires after IRA Guard's 09:45 ET run; this
+#                            is AFTER the 09:30 ET market open, so the
+#                            "premarket" label is a misnomer.
+#   17:45 ET post-market  — recommendations for the next trading day.
+#                            Fires after IRA Guard's 17:30 ET run.
+0 10 * * 1-5  /home/johnh/repos/mef/scripts/cron_run.sh premarket-run   >> /mnt/aftdata/logs/mef/cron.log 2>&1
 45 17 * * 1-5 /home/johnh/repos/mef/scripts/cron_run.sh postmarket-run  >> /mnt/aftdata/logs/mef/cron.log 2>&1
