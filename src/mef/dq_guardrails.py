@@ -42,6 +42,15 @@ DRAWDOWN_SUSPECT_THRESHOLD = -0.99
 peak_252d that produced them is almost certainly inflated by the
 reverse-split-cascade artifact, not a real 99-100% drawdown."""
 
+# Short-horizon (≈63 trading day) drawdowns deeper than this are
+# extraordinarily rare in real markets and almost always indicate a
+# split-adjusted-close vs unadjusted-high mismatch in the underlying
+# mart bars (the Job 2 pullback engine queries MAX(high) directly from
+# mart.stock_{equity,etf}_daily rather than relying on a curated
+# drawdown column, so the same upstream defect surfaces in a different
+# form). Treat such values as missing rather than as real signals.
+DRAWDOWN_63D_SUSPECT_THRESHOLD = -0.50
+
 
 def is_drawdown_suspect(dd: float | None) -> bool:
     """True when ``dd`` is in the suspect band (≤ ``-0.99``).
@@ -53,6 +62,17 @@ def is_drawdown_suspect(dd: float | None) -> bool:
     return dd <= DRAWDOWN_SUSPECT_THRESHOLD
 
 
+def is_short_horizon_drawdown_suspect(dd: float | None) -> bool:
+    """True when a ≈63-day drawdown is deeper than the short-horizon
+    suspect floor. Used by Job 2 (Core Pullback Watchlist) to ignore
+    split-adjustment mart-data artifacts that would otherwise produce
+    fake 80%+ short-term drawdowns and meaningless buy levels.
+    """
+    if dd is None:
+        return False
+    return dd <= DRAWDOWN_63D_SUSPECT_THRESHOLD
+
+
 def safe_drawdown(dd: float | None) -> float | None:
     """Return ``dd`` if it's a trustworthy signal, else ``None``.
 
@@ -62,6 +82,15 @@ def safe_drawdown(dd: float | None) -> float | None:
     correct behavior with no other changes.
     """
     if dd is None or is_drawdown_suspect(dd):
+        return None
+    return dd
+
+
+def safe_short_horizon_drawdown(dd: float | None) -> float | None:
+    """Return ``dd`` if the short-horizon (≈63d) drawdown is plausible,
+    else ``None``. See :func:`is_short_horizon_drawdown_suspect`.
+    """
+    if dd is None or is_short_horizon_drawdown_suspect(dd):
         return None
     return dd
 

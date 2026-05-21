@@ -45,7 +45,34 @@ def _gather() -> dict[str, Any]:
     else:
         out["recommendations"] = []
     out["etf_posture"] = _fetch_etf_posture()
+    out["pullback_signals"] = _fetch_pullback_signals()
     return out
+
+
+def _fetch_pullback_signals():
+    """Build the Job 2 Core Pullback Watchlist signals.
+
+    Wrapped in a broad try/except: a SHDB or repository outage must not
+    prevent the rest of ``mef status`` from rendering. Returns None on
+    any failure; the renderer treats None as "section unavailable".
+    """
+    try:
+        from mef.core_pullback import evaluate_watchlist
+        from mef.core_pullback_evidence import fetch_pullback_evidence
+        from mef.core_pullback_repository import load_enabled_watchlist
+    except Exception:
+        return None
+    try:
+        watchlist = load_enabled_watchlist()
+        if not watchlist:
+            return []
+        symbols_by_kind: dict[str, list[str]] = {"stock": [], "etf": []}
+        for row in watchlist:
+            symbols_by_kind.setdefault(row.asset_kind, []).append(row.symbol)
+        evidence = fetch_pullback_evidence(symbols_by_kind)
+        return evaluate_watchlist(watchlist, evidence)
+    except Exception:
+        return None
 
 
 def _fetch_universe_counts() -> dict[str, int]:
@@ -252,8 +279,25 @@ def _render(r: dict[str, Any]) -> str:
         lines.extend(_render_watch(watch))
 
     lines.append("")
+    lines.extend(_render_pullback_watchlist(r))
+
+    lines.append("")
     lines.extend(_render_etf_posture(r))
     return "\n".join(lines)
+
+
+def _render_pullback_watchlist(r: dict[str, Any]) -> list[str]:
+    """Render the Job 2 section. ``None`` signals come from an outage
+    inside _gather and render as a one-line "(unavailable)" note."""
+    signals = r.get("pullback_signals")
+    if signals is None:
+        return [
+            "CORE PULLBACK WATCHLIST",
+            "=======================",
+            "  (unavailable — repository or SHDB read failed; see logs)",
+        ]
+    from mef.core_pullback_render import render_section
+    return render_section(signals)
 
 
 def _render_header(r: dict[str, Any]) -> list[str]:
