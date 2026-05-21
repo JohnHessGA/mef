@@ -7,27 +7,28 @@ For MEF's place in AFT (alongside MDC, UDC, RSE, DAS, IRA Guard, Overwatch), see
 ## Status
 
 - **Introduced:** 2026-04-19 — first top-level *forecasting/recommendation* application stream in AFT, peer to IRA Guard.
-- **Current focus:** Repo + database scaffolding. Minimal CLI (`mef status`, `mef init-db`) and initial MEFDB migration before any daily-run work.
+- **Operational since 2026-04-20:** ranker, layered gating, LLM gate, lifecycle, paper/shadow scoring, two-email-per-day rendering. MEFDB populated; cron-driven premarket + postmarket runs.
+- **Current focus (2026-05-20→):** major rewrite. The pre-rewrite doc set has been snapshotted into `docs/bu20260520/` and a fresh doc set is being authored under `docs/`. Code is intact and continues to run; spec/policy text is in flight.
 
 ## Authoritative design docs
 
-The spec is the source of truth. Read the relevant section before implementing; keep this file in sync when the spec evolves.
-
-| Doc | Purpose |
-|---|---|
-| `docs/README_mef.md` | Build specification — purpose, scope, UX, universe, daily workflow, lifecycle, CLI surface, hard boundaries, build order |
-| `docs/mef_design_spec.md` | Architectural design — components, data sources, pipeline, evidence, ranking, lifecycle state machine, LLM policy, MEFDB schema, email rendering, telemetry, repo shape |
-| `docs/mef_layered_gating.md` | **Canonical** reference for the Layer A / Layer B / Layer C model (eligibility / hazard overlay / engine thesis). Wins over design spec on any gating conflict. |
-| `docs/mef_price_check.md` | Post-emission live-price sanity check. Runs on emitted ideas only; informational, never changes conviction. |
-| `notes/muse-engine-forecaster-overview.md` | Original product-vision note (human-authored) |
-| `notes/focus-universe-us-stocks-final.md` | Stock universe (305) |
-| `notes/core-us-etfs-daily-final.md` | ETF universe (15) |
+> ⚠ **Doc set is being rewritten (started 2026-05-20).** The previous spec
+> set (README_mef, mef_design_spec, mef_layered_gating, mef_price_check,
+> mef_audit_model, mef_build_order, mef_cron, mef_llm_gate, mef_operations,
+> mef_out_of_scope, plus the legacy `notes/` files) was snapshotted into
+> `docs/bu20260520/` as historical reference and is **no longer
+> authoritative**. New docs land directly in `docs/` (the `notes/` folder
+> was removed — do not re-create it).
+>
+> Until the new spec lands, treat the code as the source of truth and use
+> `docs/bu20260520/` only to recover historical intent. Do **not** edit
+> files in `docs/bu20260520/` in place — write fresh docs under `docs/`.
 
 ## Hard boundaries (don't cross)
 
 These are load-bearing. Stop and ask before crossing any of them.
 
-1. **Fixed 305+20 universe.** No broad-market screening, no dynamic universe expansion in v1. (Operator-curated bumps to the notes files — like the 2026-05-05 15→20 ETF expansion adding VUG/SCHG/SPYG/QUAL/ONEQ — are allowed; automated/screen-driven expansion is not.)
+1. **Fixed 305+20 universe.** No broad-market screening, no dynamic universe expansion in v1. (Operator-curated bumps — like the 2026-05-05 15→20 ETF expansion adding VUG/SCHG/SPYG/QUAL/ONEQ — are allowed; automated/screen-driven expansion is not. Current membership lives in `mef.universe_stock` / `mef.universe_etf`; the pre-rewrite universe lists are archived under `docs/bu20260520/`.)
 2. **No DAS dependency.** DAS does not yet exist; MEF reads SHDB directly. Revisit when DAS is real.
 3. **No RSE dependency in v1.** Revisit once RSDB has useful outputs.
 4. **No backtesting.** Historical strategy simulation belongs elsewhere (same boundary RSE enforces).
@@ -38,7 +39,7 @@ These are load-bearing. Stop and ask before crossing any of them.
 
 ## Core engineering principles
 
-1. **Ship the daily loop first.** Minimum path to "working for testing" is spelled out in `docs/mef_design_spec.md` §20. Resist adding evidence families, schema columns, or UI niceties before that minimum works.
+1. **Ship the daily loop first.** Resist adding evidence families, schema columns, or UI niceties before the end-to-end loop works. (Historical "minimum-viable loop" notes lived in `docs/mef_design_spec.md` §20 — now `docs/bu20260520/mef_design_spec.md` §20 — pending re-statement in the new doc set.)
 2. **Deterministic first, LLM second.** Direct SQL, pandas, pure Python before Claude CLI. Use the LLM only where the design spec says (final review, reasoning text).
 3. **Fail-silent telemetry.** Overwatch writes must never block a run or an email.
 4. **Rebuild-safe runs + idempotent imports.** MEFDB tables (`recommendation`, `score`, `daily_run`, etc.) are ours and **rebuild-safe** — re-running a builder over the same source window must produce the same derived rows with no duplicates or drift, but the rows themselves are not sacred (drop-and-rebuild from MEF universe + SHDB is fine). Lifecycle transitions are deterministic from inputs. CSV position imports sit at the *boundary* with external data, so file-level dedup (sha256) is genuinely **idempotent** — re-importing the same CSV is a no-op. Don't conflate: idempotency belongs at boundaries, rebuild-safety belongs to derived tables.
@@ -52,7 +53,7 @@ These are load-bearing. Stop and ask before crossing any of them.
 - **Virtual env:** `~/repos/mef/.venv/` (created with `python3 -m venv .venv`)
 - **Host:** WSL2 Ubuntu 24.04 (`codex`) on Windows 11 (`hal64`)
 - **Databases:** PostgreSQL 18.3 + TimescaleDB 2.26.4 on `localhost:5432` (upgraded from PG 16 on 2026-05-07; PG 16 retained as stopped rollback copy on :5499)
-  - `mefdb` — MEF's own database (schema `mef`, owner `mef_user`) — **not yet created**
+  - `mefdb` — MEF's own database (schema `mef`, owner `mef_user`) — created and in active use
   - `shdb` — primary data source (read-only, same PG instance)
   - `overwatch` — telemetry (fail-silent writes)
 - **Secrets:** `config/postgres.secrets.yaml` (gitignored) with `mefdb`, `shdb`, `overwatch` sections. No env-var fallback for passwords. See `~/repos/notes/secrets-conventions.md`.
@@ -68,7 +69,7 @@ These are load-bearing. Stop and ask before crossing any of them.
 | `mef run [--when {premarket\|postmarket}] [--send-email]` | Run the pipeline manually. `--when` is informational only; the runtime does not branch on it. |
 | `mef status` | Environment, DB connectivity, data freshness, last run summary |
 | `mef init-db` | Apply MEFDB migrations (idempotent) |
-| `mef universe [load]` | Show universe; `load` syncs tables from `notes/` files |
+| `mef universe [load]` | Show universe; `load` syncs `mef.universe_stock` / `mef.universe_etf` from the operator-curated universe definitions |
 | `mef recommendations [...]` | List recommendations by lifecycle state |
 | `mef show <rec-id>` | Detail on a recommendation |
 | `mef dismiss <rec-id>` | Mark a proposed recommendation as not-implemented |
@@ -76,11 +77,11 @@ These are load-bearing. Stop and ask before crossing any of them.
 | `mef score` | Re-evaluate closed recommendations and refresh scoring |
 | `mef report --when {premarket\|postmarket}` | Render the email body without sending (deprecated; emits a deprecation notice). |
 
-Currently implemented: `status`, `init-db`. The rest stub out.
+All commands above are implemented as of 2026-04-20.
 
 ## MEFDB (schema `mef`)
 
-Canonical list lives in `docs/mef_design_spec.md` §11. The v1 tables are:
+The v1 tables (pre-rewrite list — re-confirm against migrations and the new spec once it lands; historical narrative in `docs/bu20260520/mef_design_spec.md` §11):
 
 `universe_stock`, `universe_etf`, `daily_run`, `candidate`, `recommendation`,
 `recommendation_update`, `import_batch`, `position_snapshot`,
@@ -96,12 +97,14 @@ UID prefixes: `DR-` daily_run, `C-` candidate, `R-` recommendation, `I-` import_
 `eligibility_fail_reasons`. `conviction_score` holds the final
 (post-overlay) value — selectors compare against it.
 
-Read the design spec before writing any DDL or repository code. Start minimal; add columns only when a concrete caller needs them.
+Start minimal; add columns only when a concrete caller needs them. (Once the new spec replaces `docs/bu20260520/mef_design_spec.md`, treat it as the read-first reference for DDL or repository code.)
 
-## Build order (mirrors `docs/README_mef.md` §"Build Order")
+## Build order (historical — pre-rewrite)
+
+The original 10-step build order (`docs/bu20260520/README_mef.md` §"Build Order" + `docs/bu20260520/mef_build_order.md`) carried the v1 system from empty repo through scoring + email polish, and all ten steps shipped. A fresh build order for the major rewrite will land in `docs/` when the new spec does.
 
 1. **Repo & database setup** — repo skeleton, MEFDB + `mef_user`, minimal schema migration, `mef status`
-2. **Universe load** — `mef universe load` from the notes files
+2. **Universe load** — `mef universe load`
 3. **Skeleton daily run** — `mef run` executes end-to-end with a dummy ranker, writes `daily_run`, sends email
 4. **Evidence & ranker v0** — small deterministic evidence set, simple ranker
 5. **LLM review** — Claude CLI integration, `llm_trace`, prompt template
@@ -120,12 +123,12 @@ Read the design spec before writing any DDL or repository code. Start minimal; a
 
 ## LLM use
 
-Per `docs/mef_design_spec.md` §10:
+(Historical policy from `docs/bu20260520/mef_design_spec.md` §10 — re-statement pending in the new doc set.)
 
 - **Good uses:** final review over ranker candidates, reasoning-summary text in emails, flagging plans that look inconsistent with broader context.
 - **Avoid:** generating candidates from scratch, changing entry/exit prices, replacing deterministic ranker thresholds.
 
-Every LLM call is logged to `mef.llm_trace`. Failures do not fail the run — MEF continues with a placeholder reasoning field.
+Every LLM call is logged to `mef.llm_trace`. Failures do not fail the run — MEF continues with a placeholder reasoning field, and the candidate is presented as "Algorithmic candidates not fully reviewed" rather than as an approved actionable idea.
 
 ## Telemetry
 
@@ -148,8 +151,10 @@ MEF has no predecessor inside AFT. It borrows patterns from IRA Guard (CSV inges
 
 | Topic | Location |
 |---|---|
-| Build spec | `docs/README_mef.md` |
-| Design spec | `docs/mef_design_spec.md` |
+| Pre-rewrite build spec (historical) | `docs/bu20260520/README_mef.md` |
+| Pre-rewrite design spec (historical) | `docs/bu20260520/mef_design_spec.md` |
+| Pre-rewrite layered gating (historical) | `docs/bu20260520/mef_layered_gating.md` |
+| New doc set (in-progress, 2026-05-20→) | `docs/` (excluding `bu20260520/`) |
 | System-wide conventions | `~/repos/notes/conventions.md` |
 | Database catalog | `~/repos/notes/databases.md` |
 | AFT architecture overview | `~/repos/CLAUDE.md` |
