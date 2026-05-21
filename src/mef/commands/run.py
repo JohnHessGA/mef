@@ -16,11 +16,13 @@ from mef.run_pipeline import execute
 
 
 def run(args) -> int:
-    # `when` is preserved for two reasons: (1) the mef.daily_run.when_kind
-    # CHECK constraint still only accepts 'premarket' / 'postmarket', and
-    # the Grafana dashboard reads that column; (2) the cron aliases set
-    # it. The runtime does not branch on it.
-    when = getattr(args, "when", "postmarket") or "postmarket"
+    # Default is now the neutral 'run' (migration 014 widened the CHECK
+    # constraint to allow it). The runtime does not branch on this value;
+    # it is stamped on mef.daily_run.when_kind so the Grafana dashboard
+    # still has a populated column. The deprecated `premarket-run` /
+    # `postmarket-run` aliases override the default with their legacy
+    # value for historical dashboard continuity.
+    when = getattr(args, "when", "run") or "run"
     send_email = bool(getattr(args, "send_email", False))
     summary = execute(when, dry_run=not send_email)
 

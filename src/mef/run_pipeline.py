@@ -57,6 +57,13 @@ from mef.telemetry import (
 from mef.uid import next_uid
 
 _INTENT = {
+    # Canonical single-run model — the runtime does not branch on these
+    # values. They are stamped onto mef.daily_run / ow.mef_run so the
+    # Grafana dashboard keeps a populated column.
+    "run":        "standard",
+    # Legacy values kept so the deprecated `premarket-run` /
+    # `postmarket-run` aliases continue to populate the same columns
+    # they always did (historical dashboard continuity).
     "premarket":  "today_after_10am",
     "postmarket": "next_trading_day",
 }
@@ -554,7 +561,9 @@ def _abort_for_stale_data(
 
 def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
     if when_kind not in _INTENT:
-        raise ValueError(f"when_kind must be premarket|postmarket, got {when_kind!r}")
+        raise ValueError(
+            f"when_kind must be one of {sorted(_INTENT)}, got {when_kind!r}"
+        )
 
     app_cfg = load_app_config()
     ranker_cfg = app_cfg.get("ranker") or {}

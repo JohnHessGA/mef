@@ -86,13 +86,15 @@ def _add_run(sub: argparse._SubParsersAction) -> None:
             "does NOT send email unless --send-email is passed."
         ),
     )
-    # --when is now optional and informational. The pipeline produces the
-    # best slate it can from current data regardless of which window we're
-    # nominally in. Kept for backward compatibility with cron entries.
+    # --when is informational only; the pipeline does not branch on it.
+    # Hidden from help. Default is the neutral 'run' (Step 2, migration
+    # 014). Legacy 'premarket' / 'postmarket' values are still accepted
+    # so the deprecated alias dispatchers and any external cron lines
+    # passing --when explicitly keep working.
     p.add_argument(
         "--when",
-        choices=["premarket", "postmarket"],
-        default="postmarket",
+        choices=["premarket", "postmarket", "run"],
+        default="run",
         help=argparse.SUPPRESS,
     )
     p.add_argument(

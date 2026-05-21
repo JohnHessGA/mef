@@ -160,3 +160,43 @@ def test_job1_universe_counts_still_match(mefdb) -> None:
         etfs = cur.fetchone()[0]
     assert stocks == 305
     assert etfs == 20
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Step 2 — daily_run.when_kind CHECK accepts all three values
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_when_kind_check_allows_run_premarket_postmarket(mefdb) -> None:
+    """Migration 014 widens the CHECK constraint to include 'run' while
+    keeping 'premarket' and 'postmarket' so historical rows + the
+    deprecated aliases continue to validate."""
+    with mefdb.cursor() as cur:
+        cur.execute("""
+            SELECT pg_get_constraintdef(oid)
+              FROM pg_constraint
+             WHERE conname = 'daily_run_when_kind_check'
+               AND conrelid = 'mef.daily_run'::regclass
+        """)
+        row = cur.fetchone()
+    assert row is not None, "daily_run_when_kind_check constraint missing"
+    chkdef = row[0]
+    for v in ("premarket", "postmarket", "run"):
+        assert v in chkdef, f"when_kind CHECK is missing {v!r}: {chkdef}"
+
+
+def test_when_kind_insert_allows_run(mefdb) -> None:
+    """Sanity-insert a 'run' row and roll back. Confirms the widened
+    constraint accepts the new value at the row level, not just in the
+    catalog string."""
+    with mefdb.cursor() as cur:
+        cur.execute("BEGIN")
+        try:
+            cur.execute("""
+                INSERT INTO mef.daily_run (uid, when_kind, intent, started_at, status)
+                VALUES ('DR-TEST-RUN-CHECK', 'run', 'standard', now(), 'running')
+            """)
+            cur.execute("SELECT when_kind FROM mef.daily_run WHERE uid='DR-TEST-RUN-CHECK'")
+            assert cur.fetchone()[0] == "run"
+        finally:
+            cur.execute("ROLLBACK")
