@@ -242,3 +242,55 @@ def test_etf_posture_groups_by_label():
     assert out.index("healthy_pullback") < out.index("breakdown_risk")
     assert "extended_wait (1)" in out
     assert "near_entry (0)" in out
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Default-report contract (2026-05-21): ETF-posture section removed.
+# The full _render() must include Actionable / Watch / Core Pullback
+# but NOT the standalone ETF posture readout (it now overlaps with the
+# Core Pullback Watchlist and confused the reader).
+# ─────────────────────────────────────────────────────────────────────────
+
+def _build_report_dict():
+    """Minimal fixture for the full-render contract tests."""
+    from datetime import datetime, timezone
+    return {
+        "now": datetime(2026, 5, 21, 9, 30, tzinfo=timezone.utc),
+        "universe": {"stocks": 305, "etfs": 20},
+        "data_through": None,
+        "recommendations": [],
+        "pullback_signals": [],
+        # Note: no "etf_posture" key — _gather() no longer populates it.
+    }
+
+
+def test_full_render_includes_core_pullback_watchlist_header():
+    from mef.commands.status import _render
+    body = _render(_build_report_dict())
+    assert "CORE PULLBACK WATCHLIST" in body
+
+
+def test_full_render_does_not_include_etf_posture_section():
+    """The old `ETF posture (N)` header must not appear by default.
+    Removing it eliminates the conflicting ETF readout."""
+    from mef.commands.status import _render
+    body = _render(_build_report_dict())
+    assert "ETF posture" not in body
+
+
+def test_full_render_keeps_actionable_and_watch_headers_when_recs_exist():
+    from mef.commands.status import _render
+    r = _build_report_dict()
+    r["recommendations"] = [{
+        "symbol": "AAPL", "asset_kind": "stock", "posture": "bullish",
+        "expression": "buy_shares", "entry_method": "limit order $100-$102",
+        "stop_level": 95.0, "target_level": 110.0, "confidence": 0.80,
+        "state": "proposed", "reasoning_summary": "trend intact",
+        "engine": "trend",
+        "llm_gate_decision": "approve", "llm_gate_issue_type": None,
+        "llm_gate_key_judgment": None, "close": 101.0, "company_name": "Apple",
+    }]
+    body = _render(r)
+    assert "Actionable Stock Ideas" in body
+    assert "Watch / Not Actionable" in body
+    assert "ETF posture" not in body

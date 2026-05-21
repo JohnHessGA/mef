@@ -1,14 +1,22 @@
 """`mef status` — user-facing investing report (read-only).
 
-Compact header + two sections:
+Compact header + three sections:
 
-  Actionable Stock Ideas — recs the LLM gate cleared (`approve`) and
-                          where the price is consistent with the plan.
-  Watch / Not Actionable — recs the gate held for review, or that show
-                          posture/evidence mismatch, missing
-                          stabilization, or low conviction.
+  Actionable Stock Ideas    — Job 1 recs the LLM gate cleared (`approve`)
+                              and where price is consistent with the plan.
+  Watch / Not Actionable    — Job 1 recs the gate held for review, or that
+                              show posture/evidence mismatch, missing
+                              stabilization, or low conviction.
+  Core Pullback Watchlist   — Job 2 deterministic pullback statuses on the
+                              curated 10+50 watchlist (see core_pullback*).
 
-Plus the ETF posture summary as informational market context.
+The ETF-posture summary previously rendered after the watchlist was
+removed on 2026-05-21 because it overlapped conceptually with Core
+Pullback and produced two competing ETF readouts (e.g., IWM showing up
+as BUY_ZONE_ACTIVE in one section and `healthy_pullback` in the other).
+The underlying helpers `_fetch_etf_posture` / `_render_etf_posture`
+remain in this module so a future dedicated ETF view can use them
+without re-writing the data plumbing.
 
 No latest-run metadata, no DB connectivity, no recent-alert telemetry —
 that lives in `mef health`. No DB writes, no email, no pipeline run.
@@ -44,7 +52,11 @@ def _gather() -> dict[str, Any]:
         out["recommendations"] = _fetch_recommendations(latest_run_uid)
     else:
         out["recommendations"] = []
-    out["etf_posture"] = _fetch_etf_posture()
+    # ETF posture is no longer rendered in the default report (see module
+    # docstring). Skip the fetch entirely so `mef status` doesn't pay for
+    # a full 325-symbol pull_latest_evidence() call that nobody reads.
+    # The _fetch_etf_posture / _render_etf_posture helpers remain in
+    # this module for a future dedicated ETF view.
     out["pullback_signals"] = _fetch_pullback_signals()
     return out
 
@@ -281,8 +293,10 @@ def _render(r: dict[str, Any]) -> str:
     lines.append("")
     lines.extend(_render_pullback_watchlist(r))
 
-    lines.append("")
-    lines.extend(_render_etf_posture(r))
+    # ETF posture section intentionally NOT rendered here — it overlapped
+    # with Core Pullback Watchlist and confused the reader. Helper kept
+    # in this module for a future dedicated view. See the module docstring.
+
     return "\n".join(lines)
 
 
