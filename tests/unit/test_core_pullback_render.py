@@ -275,3 +275,157 @@ def test_non_monotone_inner_level_is_dropped():
     assert "starter $490" in text
     assert "better $470" in text
     assert "deep $480" not in text
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Pass 2: "already in/beyond" reason wording for actionable buckets
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_buy_zone_active_reason_says_already_in_buy_zone():
+    """BUY_ZONE_ACTIVE means the engine has already declared that price
+    crossed below the buy_zone threshold. The reason line must say so
+    explicitly so a reader doesn't wonder why starter/better are absent."""
+    sigs = [_sig("ANET", STATUS_BUY_ZONE_ACTIVE,
+                 close=142.0,
+                 starter_buy_level=160.0,          # above close → dropped
+                 better_buy_level=152.0,           # above close → dropped
+                 deep_buy_level=133.0,             # below close → kept
+                 drawdown_63d=-0.21, drawdown_252d=-0.18)]
+    text = "\n".join(render_section(sigs))
+    assert "current price is already in the buy zone" in text
+    # Bracketing pieces still present.
+    assert "down 21%" in text
+    assert "trend intact" in text
+
+
+def test_deep_pullback_reason_says_already_beyond_deep_threshold():
+    sigs = [_sig("MSFT", STATUS_DEEP_PULLBACK_OPPORTUNITY,
+                 close=417.0,
+                 starter_buy_level=412.0, better_buy_level=399.0,
+                 deep_buy_level=460.0,             # > close → dropped
+                 drawdown_63d=-0.04, drawdown_252d=-0.23)]
+    text = "\n".join(render_section(sigs))
+    assert "current price is already beyond deep pullback threshold" in text
+    assert "down 23%" in text
+    assert "trend intact" in text
+
+
+def test_buy_zone_lone_surviving_deep_renamed_deeper_add():
+    """ANET-style row: starter/better above close, only deep survives.
+    The lone deep level must render as 'deeper add' so the reader
+    doesn't read a bare 'deep $133' as 'this is the first buy level'."""
+    sigs = [_sig("ANET", STATUS_BUY_ZONE_ACTIVE,
+                 close=142.0,
+                 starter_buy_level=160.0,
+                 better_buy_level=152.0,
+                 deep_buy_level=133.0,
+                 drawdown_63d=-0.21, drawdown_252d=-0.18)]
+    text = "\n".join(render_section(sigs))
+    assert "deeper add $133" in text
+    # Original "deep $133" wording must not leak through.
+    assert "deep $133" not in text.replace("deeper add $133", "")
+
+
+def test_lone_better_keeps_its_label():
+    """Only `deep` gets the 'deeper add' rename. A lone surviving
+    starter or better still uses its natural label so we don't pretend
+    a starter is an add level."""
+    sigs = [_sig("BBB", STATUS_PULLBACK_FORMING,
+                 close=200.0,
+                 starter_buy_level=210.0,          # > close → dropped
+                 better_buy_level=195.0,           # < close → kept
+                 deep_buy_level=205.0,             # non-monotone after better → dropped
+                 drawdown_63d=-0.06, drawdown_252d=-0.07)]
+    text = "\n".join(render_section(sigs))
+    assert "better $195" in text
+    assert "deeper add" not in text
+
+
+def test_three_surviving_levels_keep_deep_label():
+    """When starter/better/deep all survive, 'deep' stays — context is
+    self-explanatory next to its siblings."""
+    sigs = [_sig("JPM", STATUS_BUY_ZONE_ACTIVE,
+                 close=296.0,
+                 starter_buy_level=295.0,
+                 better_buy_level=285.0,
+                 deep_buy_level=274.0,
+                 drawdown_63d=-0.05, drawdown_252d=-0.12)]
+    text = "\n".join(render_section(sigs))
+    assert "starter $295" in text
+    assert "better $285" in text
+    assert "deep $274" in text
+    assert "deeper add" not in text
+
+
+def test_deep_pullback_with_all_levels_dropped_still_has_reason_clarifier():
+    """Edge case where every level lands above close (close has moved
+    past all three anchors). No levels in the header, but the reason
+    line still explains why."""
+    sigs = [_sig("ZZZ", STATUS_DEEP_PULLBACK_OPPORTUNITY,
+                 close=50.0,
+                 starter_buy_level=60.0, better_buy_level=58.0,
+                 deep_buy_level=55.0,
+                 drawdown_63d=-0.30, drawdown_252d=-0.40)]
+    text = "\n".join(render_section(sigs))
+    # No level wording in the header line ("$" next to a label).
+    assert "starter $" not in text
+    assert "better $" not in text
+    assert "deep $" not in text
+    assert "deeper add $" not in text
+    # But the reason clarifier still fires.
+    assert "current price is already beyond deep pullback threshold" in text
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Pass 2: data-quality cautions are silenced in the default render
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_dq_cautions_do_not_leak_into_default_render():
+    """Pre-2026-05-21 the reason line included a `⚠ suspect_drawdown…`
+    fragment that cluttered an already terse section. Cautions stay on
+    the dataclass for a future debug view but must not surface here."""
+    sigs = [_sig("CELH", STATUS_THESIS_BROKEN_REVIEW,
+                 close=29.0,
+                 starter_buy_level=53.0, better_buy_level=50.0,
+                 deep_buy_level=48.0,
+                 drawdown_63d=None,
+                 drawdown_252d=-0.55,
+                 trend_health="broken",
+                 cautions=["suspect_drawdown_63d -51%: dropped (likely split artifact)",
+                           "missing_high_63d: starter/better levels degraded"])]
+    text = "\n".join(render_section(sigs))
+    assert "suspect_drawdown_63d" not in text
+    assert "split artifact" not in text
+    assert "missing_high_63d" not in text
+    # Headline + suffix still present so the row is intelligible.
+    assert "long-term trend broken" in text
+    assert "no buy levels shown" in text
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Pass 2: THESIS / RISK CHANGED cap is lower than the other buckets
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_thesis_broken_bucket_capped_at_five_and_summarized():
+    """A 20-name selloff cluster must not dominate the daily report."""
+    sigs = [_sig(f"T{i:02d}", STATUS_THESIS_BROKEN_REVIEW,
+                 close=10.0 + i,
+                 drawdown_252d=-0.40 - i * 0.005,
+                 trend_health="broken") for i in range(20)]
+    out = render_section(sigs)
+    text = "\n".join(out)
+    # Five rows rendered; the rest summarized.
+    rendered = sum(1 for line in out if line.strip().startswith("T") and "$" in line)
+    assert rendered == 5, f"expected 5 rendered rows, got {rendered}"
+    assert "…and 15 more in this bucket." in text   # 20 - 5 cap = 15
+
+
+def test_other_buckets_keep_the_default_cap_of_twelve():
+    """Only THESIS_BROKEN gets the tighter cap. The other notable
+    buckets retain the standard 12-row cap so they aren't truncated
+    prematurely."""
+    sigs = [_sig(f"P{i:02d}", STATUS_PULLBACK_FORMING,
+                 drawdown_63d=-0.07 - i * 0.001) for i in range(15)]
+    out = render_section(sigs)
+    text = "\n".join(out)
+    assert "…and 3 more in this bucket." in text   # 15 - 12 = 3

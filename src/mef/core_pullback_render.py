@@ -38,9 +38,16 @@ _SUPPRESSED_LEVEL_SUFFIX = {
 }
 
 
-# Safety cap so a market-wide selloff doesn't dump 50+ rows into the
-# default report. Operators can dig into details via a future flag.
-_MAX_NOTABLE_PER_STATUS = 12
+# Per-status safety caps. THESIS / RISK CHANGED rows are context, not
+# actionable, so they get a tighter cap — a big selloff cluster
+# otherwise dominates the daily report. The other notable buckets
+# share the default cap.
+_DEFAULT_NOTABLE_CAP = 12
+_THESIS_BROKEN_CAP = 5
+
+_NOTABLE_CAP_BY_STATUS = {
+    STATUS_THESIS_BROKEN_REVIEW: _THESIS_BROKEN_CAP,
+}
 
 
 # Display headers per status. Slightly more emphatic than the
@@ -89,9 +96,10 @@ def render_section(signals: list[PullbackSignal]) -> list[str]:
         # Sort within bucket: deepest pullback first (most negative drawdown_252d,
         # falling back to drawdown_63d, then symbol).
         bucket.sort(key=_sort_key_deepest_first)
-        if len(bucket) > _MAX_NOTABLE_PER_STATUS:
-            shown = bucket[:_MAX_NOTABLE_PER_STATUS]
-            hidden = len(bucket) - _MAX_NOTABLE_PER_STATUS
+        cap = _NOTABLE_CAP_BY_STATUS.get(status, _DEFAULT_NOTABLE_CAP)
+        if len(bucket) > cap:
+            shown = bucket[:cap]
+            hidden = len(bucket) - cap
         else:
             shown = bucket
             hidden = 0
@@ -132,8 +140,10 @@ def _format_signal_block(sig: PullbackSignal) -> list[str]:
 
 
 def _displayable_levels(sig: PullbackSignal) -> list[tuple[str, float]]:
-    """Return (label, value) pairs in display order, with two safety filters.
+    """Return (label, value) pairs in display order, with safety filters
+    and context-aware labels.
 
+    Filters:
     1. Drop any level that is not strictly below ``close``. A "buy level"
        at or above the current price reads as "buy at a higher price",
        which is nonsense for a pullback report.
@@ -142,6 +152,13 @@ def _displayable_levels(sig: PullbackSignal) -> list[tuple[str, float]]:
        anchors (high_63d vs recovered peak_252d) and occasionally land
        out of order — better to suppress the misleading one than to
        label it with anchor-context that doesn't help a quick scan.
+
+    Labeling:
+    - If the lone survivor is the original ``deep`` level (starter and
+      better both above close, so price has already moved past the
+      normal buy zone), relabel it as ``"deeper add"``. A bare ``deep``
+      next to a current price reads ambiguously; ``deeper add`` signals
+      "we're already past the normal zone — this is the add-lower level".
     """
     close = sig.close
     if close is None:
@@ -163,6 +180,12 @@ def _displayable_levels(sig: PullbackSignal) -> list[tuple[str, float]]:
             out.append((label, value))
             prev = value
         # else: drop this level — keeps the rendered set monotone.
+
+    # Relabel a lone-surviving "deep" → "deeper add". Three- and
+    # two-element sets keep their original labels because the context
+    # of starter/better next to deep is self-explanatory.
+    if len(out) == 1 and out[0][0] == "deep":
+        return [("deeper add", out[0][1])]
     return out
 
 
@@ -185,14 +208,23 @@ def _compose_reason_line(sig: PullbackSignal) -> str:
     elif dd252 is not None:
         pieces.append(f"down {fmt_pct_human(dd252)} from 252d high")
 
-    # Trend / stabilization headline
+    # Trend / stabilization headline.
+    #
+    # For BUY_ZONE_ACTIVE and DEEP_PULLBACK_OPPORTUNITY we explicitly
+    # tell the reader that the current price has already crossed below
+    # the relevant threshold. The status itself is the assertion (the
+    # engine sets it on `pullback_pct >= threshold`), so the wording is
+    # safe to add unconditionally — and it explains why some levels are
+    # absent from the header line.
     if sig.status == STATUS_THESIS_BROKEN_REVIEW:
         pieces.append("long-term trend broken")
     elif sig.status == STATUS_FALLING_KNIFE_WAIT:
         pieces.append("stabilization not confirmed")
     elif sig.status == STATUS_DEEP_PULLBACK_OPPORTUNITY:
+        pieces.append("current price is already beyond deep pullback threshold")
         pieces.append("trend intact")
     elif sig.status == STATUS_BUY_ZONE_ACTIVE:
+        pieces.append("current price is already in the buy zone")
         pieces.append("trend intact")
     elif sig.status == STATUS_PULLBACK_FORMING:
         if sig.stabilization == "unknown":
@@ -200,10 +232,10 @@ def _compose_reason_line(sig: PullbackSignal) -> str:
         else:
             pieces.append("still above preferred buy zone")
 
-    if sig.cautions:
-        # Show the first 1–2 cautions tersely; the full list lives on the dataclass.
-        for c in sig.cautions[:2]:
-            pieces.append(f"⚠ {c}")
+    # Data-quality cautions are intentionally NOT rendered in the default
+    # report — they would clutter a section that's read for action, not
+    # for plumbing health. The cautions remain on the PullbackSignal
+    # dataclass for a future details / debug view.
 
     line = "; ".join(pieces) if pieces else sig.display_label
     return line + _SUPPRESSED_LEVEL_SUFFIX.get(sig.status, "")
