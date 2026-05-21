@@ -1,5 +1,10 @@
 # Core US ETFs — Daily Tradable Shortlist (20 Symbols)
 
+> **Documentation only.** Operational universe data lives in MEFDB
+> (`mef.universe_etf`), seeded by SQL migrations in `sql/mefdb/`. No
+> runtime or loader code reads this file. Edits here update the human
+> rationale only — to change what MEF actually scores, edit MEFDB.
+
 Version: 2026-05-05 (expanded from 15 → 20: added VUG, SCHG, SPYG, QUAL under Style/Factor; ONEQ under Broad Market)
 
 This is a daily-use set of core US ETF list. It is designed for a forecasting tool that values **tradability, liquidity, and clear role definition** over maximum coverage.

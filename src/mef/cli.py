@@ -51,26 +51,29 @@ DEPRECATED_NOTE = (
 def _add_premarket_run(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "premarket-run",
-        help="Run the MEF pipeline for the premarket window + send the daily email.",
+        help="[DEPRECATED] Alias for `mef run --send-email`. Same behavior; kept for legacy cron lines.",
         description=(
-            "Premarket cron entry point. Equivalent to "
-            "`mef run --when premarket --send-email` but the new canonical "
-            "name. Use this in cron lines from Phase 5 onward."
+            "Deprecated alias of `mef run --send-email`. MEF has a single run "
+            "behavior; scheduling decides when it fires. This wrapper still "
+            "exists so legacy cron entries keep working, and stamps when_kind="
+            "'premarket' on the daily_run row for Grafana compatibility."
         ),
     )
-    p.set_defaults(func=_run_mef_run, when="premarket", send_email=True)
+    p.set_defaults(func=_deprecated("premarket-run", _run_mef_run), when="premarket", send_email=True)
 
 
 def _add_postmarket_run(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "postmarket-run",
-        help="Run the MEF pipeline for the postmarket window + send the daily email.",
+        help="[DEPRECATED] Alias for `mef run --send-email`. Same behavior; kept for legacy cron lines.",
         description=(
-            "Postmarket cron entry point. Equivalent to "
-            "`mef run --when postmarket --send-email`."
+            "Deprecated alias of `mef run --send-email`. MEF has a single run "
+            "behavior; scheduling decides when it fires. This wrapper still "
+            "exists so legacy cron entries keep working, and stamps when_kind="
+            "'postmarket' on the daily_run row for Grafana compatibility."
         ),
     )
-    p.set_defaults(func=_run_mef_run, when="postmarket", send_email=True)
+    p.set_defaults(func=_deprecated("postmarket-run", _run_mef_run), when="postmarket", send_email=True)
 
 
 def _add_run(sub: argparse._SubParsersAction) -> None:
@@ -119,14 +122,17 @@ def _add_health(sub: argparse._SubParsersAction) -> None:
 def _add_universe(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "universe",
-        help="Show the 305-stock + 20-ETF universe.",
+        help="Show the 305-stock + 20-ETF Job 1 universe (read-only, from MEFDB).",
     )
+    # `load` is still accepted so old cron lines / docs don't hard-crash;
+    # the dispatcher prints a removal notice and exits 2. Show remains the
+    # default for `mef universe` with no args.
     p.add_argument(
         "action",
         nargs="?",
         default="show",
         choices=["show", "load"],
-        help="'show' (default) prints the universe; 'load' is [DEPRECATED] (pending removal).",
+        help="'show' (default) prints the universe; 'load' is removed and exits with an error.",
     )
     p.set_defaults(func=_run_universe)
 
@@ -277,8 +283,6 @@ def _run_init_db(args) -> int:
 
 
 def _run_universe(args) -> int:
-    if getattr(args, "action", "show") == "load":
-        print(DEPRECATED_NOTE.format(name="universe load"), file=sys.stderr)
     from mef.commands import universe
     return universe.run(args)
 

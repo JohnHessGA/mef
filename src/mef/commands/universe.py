@@ -1,47 +1,23 @@
-"""`mef universe` — show or reload the 305-stock + 20-ETF universe.
+"""`mef universe` — show the Job 1 (305 stocks + 20 ETFs) universe state.
 
-Subcommands (dispatched via the ``action`` positional argument):
-
-- ``show`` — print the current state of ``mef.universe_stock`` and ``mef.universe_etf``.
-- ``load`` — parse the notes files and upsert their contents into MEFDB.
+The universe lives in MEFDB (``mef.universe_stock`` / ``mef.universe_etf``)
+and is seeded by SQL migrations under ``sql/mefdb/``. This command is
+read-only — there is no longer a markdown loader to invoke.
 """
 
 from __future__ import annotations
 
+import sys
 from collections import Counter
 
-from mef.config import load_app_config
 from mef.universe_loader import (
     fetch_universe_etfs,
     fetch_universe_stocks,
-    load_universe_etfs,
-    load_universe_stocks,
     universe_counts,
 )
 
 
-def _run_load(args) -> int:
-    cfg = load_app_config()
-    universe_cfg = cfg.get("universe") or {}
-
-    stocks_path = universe_cfg.get("stocks_notes_path", "notes/focus-universe-us-stocks-final.md")
-    etfs_path = universe_cfg.get("etfs_notes_path", "notes/core-us-etfs-daily-final.md")
-
-    print(f"Loading stocks from {stocks_path} ...")
-    n_stocks = load_universe_stocks(stocks_path)
-    print(f"  upserted {n_stocks} stock rows into mef.universe_stock")
-
-    print(f"Loading ETFs from {etfs_path} ...")
-    n_etfs = load_universe_etfs(etfs_path)
-    print(f"  upserted {n_etfs} ETF rows into mef.universe_etf")
-
-    counts = universe_counts()
-    print()
-    print(f"Current totals: stocks={counts['stocks']} etfs={counts['etfs']}")
-    return 0
-
-
-def _run_show(args) -> int:
+def _run_show() -> int:
     counts = universe_counts()
     print("MEF universe")
     print("============")
@@ -72,5 +48,11 @@ def _run_show(args) -> int:
 def run(args) -> int:
     action = getattr(args, "action", "show")
     if action == "load":
-        return _run_load(args)
-    return _run_show(args)
+        print(
+            "mef universe load: removed — universe data now lives in MEFDB.\n"
+            "  Apply migrations with `mef init-db` (idempotent).\n"
+            "  Edit rows directly in mef.universe_stock / mef.universe_etf for ad-hoc changes.",
+            file=sys.stderr,
+        )
+        return 2
+    return _run_show()

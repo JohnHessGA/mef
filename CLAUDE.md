@@ -28,6 +28,7 @@ For MEF's place in AFT (alongside MDC, UDC, RSE, DAS, IRA Guard, Overwatch), see
 
 These are load-bearing. Stop and ask before crossing any of them.
 
+0. **Operational symbol lists live in MEFDB.** Runtime and loader code must not read operational symbol lists from markdown, `docs/`, or `notes/`. The Job 1 universe lives in `mef.universe_stock` / `mef.universe_etf`; the Job 2 Core Pullback Watchlist lives in `mef.core_pullback_tier` / `mef.core_pullback_watchlist`. Both are seeded by SQL migrations in `sql/mefdb/`. YAML (`config/mef.yaml`) holds settings, thresholds (when not DB-backed), feature flags, rendering options, email/logging — not symbol lists. Documentation files in `docs/` explain the lists but never feed them into the tool.
 1. **Fixed 305+20 universe.** No broad-market screening, no dynamic universe expansion in v1. (Operator-curated bumps — like the 2026-05-05 15→20 ETF expansion adding VUG/SCHG/SPYG/QUAL/ONEQ — are allowed; automated/screen-driven expansion is not. Current membership lives in `mef.universe_stock` / `mef.universe_etf`; the pre-rewrite universe lists are archived under `docs/bu20260520/`.)
 2. **No DAS dependency.** DAS does not yet exist; MEF reads SHDB directly. Revisit when DAS is real.
 3. **No RSE dependency in v1.** Revisit once RSDB has useful outputs.

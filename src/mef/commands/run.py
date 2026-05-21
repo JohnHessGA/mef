@@ -3,6 +3,11 @@
 Writes a ``mef.daily_run`` row plus candidates/recommendations and renders
 an email body. Email is *not* sent unless ``--send-email`` is passed; the
 rendered subject + body are printed to stdout for review.
+
+MEF has a single run behavior. The ``--when`` argument and the legacy
+``premarket-run`` / ``postmarket-run`` aliases still exist as compatibility
+wrappers, but they all execute the same code path. Scheduling decides
+when the run fires; the tool does not branch on the nominal window.
 """
 
 from __future__ import annotations
@@ -11,11 +16,15 @@ from mef.run_pipeline import execute
 
 
 def run(args) -> int:
+    # `when` is preserved for two reasons: (1) the mef.daily_run.when_kind
+    # CHECK constraint still only accepts 'premarket' / 'postmarket', and
+    # the Grafana dashboard reads that column; (2) the cron aliases set
+    # it. The runtime does not branch on it.
     when = getattr(args, "when", "postmarket") or "postmarket"
     send_email = bool(getattr(args, "send_email", False))
     summary = execute(when, dry_run=not send_email)
 
-    print(f"MEF run — {summary['when_kind']} ({summary['intent']})")
+    print(f"MEF run — {summary['run_uid']}")
     print("=" * 46)
     if not send_email:
         print("  email send:              SKIPPED (use --send-email to send)")

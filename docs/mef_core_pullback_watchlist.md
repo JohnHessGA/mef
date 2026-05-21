@@ -425,31 +425,34 @@ See `mef_cia_future_overlay.md`.
 
 ## Implementation Notes
 
-Likely module:
+Likely engine module:
 
 ```text
-src/mef/core_pullback.py
+src/mef/core_pullback.py        (not yet implemented)
 ```
 
-Likely config location:
+### Persistence model (already in place as of 2026-05-20)
 
-```yaml
-core_pullback:
-  enabled: true
-  watchlist:
-    etfs:
-      - symbol: SPY
-        tier: core_market_etf
-      - symbol: QQQ
-        tier: core_growth_etf
-    stocks:
-      - symbol: NVDA
-        tier: elite_compounder
-      - symbol: TSLA
-        tier: volatile_special_situation
-```
+Job 2 metadata lives in MEFDB. SQL migration
+`sql/mefdb/013_core_pullback_watchlist.sql` creates three tables in the
+`mef` schema:
 
-Likely output object:
+| Table | Role |
+|---|---|
+| `mef.core_pullback_tier` | Tier reference: drawdown thresholds, display metadata, enabled flag. 5 rows. |
+| `mef.core_pullback_watchlist` | The 10-ETF + 50-stock operational list; each row carries `symbol`, `asset_kind`, `tier_code`, `enabled`, `display_order`. |
+| `mef.core_pullback_snapshot` | One row per run per symbol, written by the pullback engine when it lands. Empty until then. |
+
+There is **no YAML watchlist file**, no markdown loader, and no config
+key. To change the operational watchlist or tier thresholds, edit MEFDB
+(directly, or by adding a new migration). The engine reads from these
+tables every run.
+
+This matches the AFT rule (per repo `CLAUDE.md`): runtime and loader
+code must not read operational symbol lists from markdown, `docs/`, or
+`notes/` — operational lists live in MEFDB. YAML is for settings only.
+
+### Engine output object (when implemented)
 
 ```python
 @dataclass
@@ -472,7 +475,9 @@ class PullbackSignal:
     cautions: list[str]
 ```
 
-Keep persistence optional until the output proves useful.
+Each computed signal becomes one `mef.core_pullback_snapshot` row (UID
+prefix `PS-`, FK to `mef.daily_run(uid)` so a run's snapshots are
+deletable as a unit).
 
 ---
 
@@ -497,13 +502,13 @@ Minimum tests:
 
 Recommended sequence:
 
-1. Land this documentation.
-2. Add config-driven watchlist.
+1. ~~Land this documentation.~~ Done.
+2. ~~Add DB-backed watchlist (`mef.core_pullback_tier` + `mef.core_pullback_watchlist`).~~ Done (migration `013_core_pullback_watchlist.sql`, 2026-05-20).
 3. Add evidence loader or reuse existing evidence bundle.
-4. Implement status calculator.
-5. Render notable section in `mef status`.
-6. Add tests.
-7. Run daily and review real output before tuning.
-8. Consider persistence after output is useful.
+4. Implement status calculator in `src/mef/core_pullback.py`.
+5. Persist results into `mef.core_pullback_snapshot` (table already exists).
+6. Render notable section in `mef status`.
+7. Add engine tests.
+8. Run daily and review real output before tuning thresholds (edit the tier rows in MEFDB or add a follow-up migration).
 9. Consider future LLM sentiment or CIA overlay only after deterministic behavior is trusted.
 

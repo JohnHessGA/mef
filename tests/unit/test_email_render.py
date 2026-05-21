@@ -20,14 +20,20 @@ def test_render_empty_is_no_new_trades():
         stocks_in_universe=305,
         etfs_in_universe=20,
     )
-    assert email.subject.startswith("MEF pre-market report")
+    assert email.subject.startswith("MEF daily report")
     assert "2026-04-19" in email.subject
     assert "No approved new stock ideas today." in email.body
     assert "305 stocks, 20 ETFs" in email.body
     assert "DR-000001" in email.body
+    # Single-run model: subject must NOT carry premarket/postmarket framing.
+    assert "pre-market" not in email.subject.lower()
+    assert "post-market" not in email.subject.lower()
 
 
-def test_render_postmarket_subject():
+def test_render_postmarket_subject_uses_neutral_wording():
+    # The when_kind kwarg is preserved for caller stability / DB compat,
+    # but it must NOT change the rendered subject or body. MEF has a
+    # single run behavior; scheduling decides when it fires.
     email = render_daily_email(
         when_kind="postmarket",
         intent="next_trading_day",
@@ -36,8 +42,9 @@ def test_render_postmarket_subject():
         stocks_in_universe=305,
         etfs_in_universe=20,
     )
-    assert email.subject.startswith("MEF post-market report")
-    assert "next trading day" in email.subject
+    assert email.subject.startswith("MEF daily report")
+    assert "next trading day" not in email.subject
+    assert "post-market" not in email.subject.lower()
 
 
 def test_render_new_ideas_listed():

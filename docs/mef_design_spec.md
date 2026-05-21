@@ -1,9 +1,37 @@
 # MEF Design Spec
 
-Version: 2026-04-19 (CLI surface updated 2026-05-06)
+Version: 2026-04-19 (CLI surface updated 2026-05-06; current-reality banner added 2026-05-20)
 Companion doc: `docs/README_mef.md` (build specification, scope, UX)
 
 This document is the **technical** view of MEF: components, data model, pipeline, scoring, LLM policy, and MEFDB schema. The README is the source of truth for scope and user experience; this spec is the source of truth for architecture.
+
+> **2026-05-20 — current-reality banner.** Several behaviors described
+> further down have evolved. Where the body of this spec conflicts with
+> this banner, the banner wins:
+>
+> - **Universe is DB-backed, not markdown-loaded.** The Job 1 305-stock +
+>   20-ETF universe lives in `mef.universe_stock` / `mef.universe_etf`
+>   and is seeded by SQL migrations in `sql/mefdb/`. The legacy
+>   `mef universe load` markdown-parser path was removed. No runtime or
+>   loader code reads `notes/` or `docs/` markdown for universe data.
+>   See `docs/focus-universe-us-stocks-final.md` / `docs/core-us-etfs-daily-final.md`
+>   for human-readable background only.
+> - **Job 2 (Core Pullback Watchlist) metadata is DB-backed.** Tables
+>   `mef.core_pullback_tier` (5 rows) and `mef.core_pullback_watchlist`
+>   (10 ETFs + 50 stocks) are seeded by `sql/mefdb/013_core_pullback_watchlist.sql`.
+>   The pullback-snapshot table is created but empty until the engine
+>   ships. See `docs/mef_core_pullback_watchlist.md`.
+> - **Single run model.** MEF has one run behavior; scheduling decides
+>   when it fires. The `premarket-run` / `postmarket-run` aliases remain
+>   as deprecated wrappers that print a deprecation notice and dispatch
+>   to the same code path. The rendered email uses neutral "MEF daily
+>   report" wording and no longer carries pre-/post-market framing. The
+>   `mef.daily_run.when_kind` column is still populated with
+>   `'premarket'` or `'postmarket'` for Grafana / dashboard compatibility
+>   (a CHECK constraint enforces those two values) — the tool itself
+>   does not branch on it.
+> - **YAML for settings only.** `config/mef.yaml` is settings, thresholds,
+>   feature flags, rendering options, email/logging — not symbol lists.
 
 > **2026-05-06 — CLI shape update.** The user-facing surface has been
 > simplified to four bare verbs: `mef status` (recs report), `mef run`

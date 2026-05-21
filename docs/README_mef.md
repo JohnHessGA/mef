@@ -338,9 +338,16 @@ The active CLI surface should remain small:
 | `mef` | Print help |
 | `mef status` | Main investing report |
 | `mef run` | Execute pipeline; no email by default |
-| `mef run --send-email` | Execute pipeline and send optional email |
+| `mef run --send-email` | Execute pipeline and send the daily email |
 | `mef health` | Operator dashboard |
-| `mef universe` | Display current MEF universes |
+| `mef universe` | Display current Job 1 MEF universe (read-only) |
+| `mef init-db` | Apply MEFDB and Overwatch migrations (idempotent) |
+
+MEF has a **single run behavior**. Scheduling decides when a run fires;
+the tool does not branch on whether it was nominally premarket or
+postmarket. The cron aliases `premarket-run` / `postmarket-run` still
+exist as deprecated compatibility wrappers that print a deprecation
+notice and dispatch to the same code path as `mef run --send-email`.
 
 Avoid adding many flags. For Job 2, prefer showing a useful default in `mef status` before creating new subcommands.
 
@@ -372,20 +379,28 @@ Job 2 should reuse SHDB evidence where possible. If a required field is missing,
 
 ## Persistence
 
-Current MEF persistence lives in MEFDB under schema `mef`.
+All MEF persistence lives in MEFDB under schema `mef`.
 
-The existing tables track daily runs, candidates, recommendations, recommendation updates, scores, paper scores, shadow scores, LLM traces, command logs, and related state.
+This includes both reference data and computed state:
 
-Job 2 may initially be computed at runtime for `mef status`. If persistence is added, it should be small and audit-oriented, such as:
+- **Reference data** (operator-curated, seeded by SQL migrations):
+  - `mef.universe_stock`, `mef.universe_etf` — the Job 1 305+20 universe
+  - `mef.core_pullback_tier`, `mef.core_pullback_watchlist` — the Job 2 tier reference and 10+50 watchlist (added 2026-05-20)
+- **Computed state** (written by runs):
+  - `mef.daily_run`, `mef.candidate`, `mef.recommendation`, `mef.recommendation_update`
+  - `mef.score`, `mef.shadow_score`, `mef.paper_score`
+  - `mef.llm_trace`, `mef.command_log`
+  - `mef.core_pullback_snapshot` — one row per run per pullback-watchlist symbol (empty until the engine lands)
 
-- one pullback snapshot per run and symbol,
-- status,
-- buy levels,
-- key measurements,
-- reasons,
-- visibility flag.
+**Rule:** operational symbol lists (universes, watchlists) live in MEFDB.
+Config YAML holds settings only. Documentation files in `docs/` explain
+the lists but never feed them into the tool. The legacy markdown-loader
+path was removed 2026-05-20.
 
-Do not create heavy schema until the runtime output proves useful.
+If pullback persistence proves overkill in practice, the
+`core_pullback_snapshot` table can be left mostly empty (or dropped in a
+future migration) without affecting Job 1. The watchlist and tier tables
+are required because the engine reads from them every run.
 
 ---
 

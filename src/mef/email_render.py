@@ -22,15 +22,11 @@ class RenderedEmail:
     body: str
 
 
-_SUBJECT_PREFIX = {
-    "premarket":  "MEF pre-market report",
-    "postmarket": "MEF post-market report",
-}
-
-_INTENT_LABEL = {
-    "today_after_10am":   "trades for today (after 10:00 ET)",
-    "next_trading_day":   "trades for the next trading day",
-}
+# MEF has a single run behavior — output does not branch on whether a run
+# was nominally scheduled as premarket or postmarket. The two parameters
+# remain on the renderer for caller stability and DB compatibility, but
+# they no longer change subject/header wording.
+_NEUTRAL_SUBJECT_PREFIX = "MEF daily report"
 
 
 def _fmt_money(v: float | None) -> str:
@@ -421,10 +417,9 @@ def render_daily_email(
     per_engine_top = per_engine_top or {}
     etf_entries = etf_entries or []
 
-    subject_prefix = _SUBJECT_PREFIX.get(when_kind, "MEF report")
+    subject_prefix = _NEUTRAL_SUBJECT_PREFIX
     date_label = started_at.strftime("%Y-%m-%d")
-    intent_label = _INTENT_LABEL.get(intent, intent)
-    subject = f"{subject_prefix} — {date_label} ({intent_label})"
+    subject = f"{subject_prefix} — {date_label}"
     if staleness_aborted:
         subject = f"[STALE DATA] {subject}"
 
@@ -432,9 +427,8 @@ def render_daily_email(
         f"{subject_prefix}",
         "=" * len(subject_prefix),
         "",
-        f"Run:      {run_uid} ({when_kind}, completed {started_at.strftime('%H:%M %Z').strip()})",
+        f"Run:      {run_uid} (completed {started_at.strftime('%H:%M %Z').strip()})",
         f"Date:     {date_label}",
-        f"Intent:   {intent_label}",
         f"Universe: {stocks_in_universe} stocks, {etfs_in_universe} ETFs",
         "",
     ]

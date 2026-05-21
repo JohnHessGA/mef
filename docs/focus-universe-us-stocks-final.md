@@ -1,5 +1,10 @@
 # Focus US Stocks (Final) — 305 Symbols
 
+> **Documentation only.** Operational universe data lives in MEFDB
+> (`mef.universe_stock`), seeded by SQL migrations in `sql/mefdb/`. No
+> runtime or loader code reads this file. Edits here update the human
+> rationale only — to change what MEF actually scores, edit MEFDB.
+
 The final curated study universe of US stocks with a liquid listed-options market. This is the working set derived from the 782-symbol focus universe by successive quality / liquidity / market-cap / options filters.
 
 **Preceding docs in the chain:**
