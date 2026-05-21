@@ -294,3 +294,95 @@ def test_full_render_keeps_actionable_and_watch_headers_when_recs_exist():
     assert "Actionable Stock Ideas" in body
     assert "Watch / Not Actionable" in body
     assert "ETF posture" not in body
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Entry Quality Overlay routing (mig 015 + entry_quality.py):
+#   LLM approve + entry_quality_status='watch' must land in Watch /
+#   Not Actionable with the deterministic "Poor Entry Quality" label.
+# ─────────────────────────────────────────────────────────────────────────
+
+def _rec_approve_with_eq_watch():
+    return {
+        "uid": "R-EQ-1", "symbol": "OXY", "asset_kind": "stock",
+        "posture": "bullish", "expression": "buy_shares",
+        "entry_method": "limit order $59-$61", "stop_level": 56.0,
+        "target_level": 65.0, "confidence": 0.80, "state": "proposed",
+        "reasoning_summary": "Strong multi-timeframe trend",
+        "engine": "trend",
+        "llm_gate_decision": "approve",          # LLM said go
+        "llm_gate_issue_type": None,
+        "llm_gate_key_judgment": "Coherent trend continuation",
+        # Entry Quality Overlay disagreed:
+        "entry_quality_status":  "watch",
+        "entry_quality_summary": "Strong trend, but poor entry quality: "
+                                 "weak risk/reward after a large 63d run "
+                                 "with little pullback.",
+        "entry_quality_flags":   ["STRONG_RUN_WEAK_RR_NO_PULLBACK"],
+        "entry_quality_risk_reward": 1.14,
+        "close": 60.70, "company_name": None,
+    }
+
+
+def test_entry_quality_watch_classifies_as_watch_even_when_llm_approved():
+    from mef.commands.status import _classify_actionable
+    rec = _rec_approve_with_eq_watch()
+    assert _classify_actionable(rec) == "watch"
+
+
+def test_entry_quality_pass_keeps_actionable():
+    from mef.commands.status import _classify_actionable
+    rec = _rec_approve_with_eq_watch()
+    rec["entry_quality_status"] = "pass"
+    rec["entry_quality_summary"] = None
+    assert _classify_actionable(rec) == "actionable"
+
+
+def test_entry_quality_status_null_keeps_pre_overlay_behavior():
+    """Old recommendation rows seeded before mig 015 carry NULL for
+    entry_quality_status. They must classify exactly as before
+    (approve→actionable)."""
+    from mef.commands.status import _classify_actionable
+    rec = _rec_approve_with_eq_watch()
+    rec["entry_quality_status"] = None
+    assert _classify_actionable(rec) == "actionable"
+
+
+def test_entry_quality_watch_picks_poor_entry_quality_label():
+    from mef.commands.status import _watch_status
+    assert _watch_status(_rec_approve_with_eq_watch()) == "Poor Entry Quality"
+
+
+def test_entry_quality_watch_renders_in_watch_section_of_full_status():
+    """End-to-end: feed the report through _render and confirm the OXY
+    row lands in the Watch / Not Actionable section, not Actionable."""
+    from mef.commands.status import _render
+    r = _build_report_dict()
+    r["recommendations"] = [_rec_approve_with_eq_watch()]
+    body = _render(r)
+
+    actionable_idx = body.index("Actionable Stock Ideas")
+    watch_idx      = body.index("Watch / Not Actionable")
+
+    assert "OXY" in body
+    # OXY must appear after the Watch header, never inside the
+    # Actionable Stock Ideas block.
+    actionable_section = body[actionable_idx:watch_idx]
+    watch_section      = body[watch_idx:]
+    assert "OXY" not in actionable_section
+    assert "OXY" in watch_section
+    # And the entry-quality summary surfaces in the detail line.
+    assert "poor entry quality" in watch_section.lower()
+
+
+def test_entry_quality_summary_used_as_detail_line():
+    """The watch block's detail line should be the entry-quality summary,
+    not the LLM's (now-stale) approval color."""
+    from mef.commands.status import _format_idea_block, _watch_status
+    rec = _rec_approve_with_eq_watch()
+    lines = _format_idea_block(rec, "Watch", _watch_status(rec))
+    detail = lines[-1]
+    assert "Poor Entry Quality" in lines[0]
+    assert "poor entry quality" in detail.lower()
+    # The LLM judgment must not leak through when the overlay demoted.
+    assert "coherent trend continuation" not in detail.lower()

@@ -29,6 +29,7 @@ from typing import Any
 from mef.config import load_app_config
 from mef.db.connection import connect_mefdb
 from mef.email_render import render_daily_email
+from mef.entry_quality import EntryQualityResult, evaluate_entry_quality
 from mef.etf_classifier import classify_universe as _classify_etf_universe
 from mef.email_send import send_daily_email
 from mef.evidence import EvidenceBundle, FreshnessReport, check_freshness, pull_latest_evidence
@@ -156,23 +157,52 @@ def _json_safe(features: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _evaluate_entry_quality_for(cand: RankedCandidate) -> EntryQualityResult:
+    """Trend-engine-only entry-quality verdict. Other engines pass.
+
+    The Entry Quality Overlay (sql/mefdb/015) targets the specific failure
+    mode the RSE research surfaced — strong-trend bullish names with a
+    weak risk/reward, big 63d run-up, and no real pullback (NDAQ/OXY
+    shape). Mean-reversion and value engines have their own controls
+    (FCF veto, etc.) and are intentionally not subject to this rule.
+    """
+    if cand.engine != "trend" or cand.posture != "bullish":
+        return evaluate_entry_quality(
+            entry_zone=None, stop=None, target=None,
+            features=cand.features or {},
+        )
+    return evaluate_entry_quality(
+        entry_zone=cand.proposed_entry_zone,
+        stop=cand.proposed_stop,
+        target=cand.proposed_target,
+        features=cand.features or {},
+    )
+
+
 def _insert_candidates(
     conn, run_uid: str, candidates: list[RankedCandidate],
     outcomes: dict[tuple[str, str], dict[str, Any]],
-) -> dict[tuple[str, str], str]:
-    """Insert one candidate row per (engine, symbol). Returns {(engine, symbol): uid}.
+) -> tuple[dict[tuple[str, str], str], dict[tuple[str, str], EntryQualityResult]]:
+    """Insert one candidate row per (engine, symbol).
 
-    Persists the full Layer-A/B/C decomposition: eligibility flags,
-    raw vs final conviction, hazard-penalty components, and the
-    pre-LLM selection / suppression outcome. ``outcomes`` comes from
-    ``ranker.classify_outcomes`` and is keyed by (engine, symbol).
+    Returns ``(uid_map, eq_map)``:
+      * ``uid_map``  → ``{(engine, symbol): candidate_uid}``
+      * ``eq_map``   → ``{(engine, symbol): EntryQualityResult}`` for downstream
+                       routing in :func:`_insert_recommendations` (so the
+                       evaluation runs exactly once per candidate, not twice).
+
+    Persists the full Layer-A/B/C decomposition plus the Entry Quality
+    Overlay verdict (mig 015): status, flags, summary, risk_reward.
     """
     uid_map: dict[tuple[str, str], str] = {}
+    eq_map: dict[tuple[str, str], EntryQualityResult] = {}
     with conn.cursor() as cur:
         for cand in candidates:
             uid = next_uid(conn, "candidate")
             key = (cand.engine, cand.symbol)
             outcome = outcomes.get(key) or {}
+            eq = _evaluate_entry_quality_for(cand)
+            eq_map[key] = eq
             cur.execute(
                 """
                 INSERT INTO mef.candidate (
@@ -184,7 +214,9 @@ def _insert_candidates(
                     eligibility_pass, eligibility_fail_reasons,
                     feature_json, proposed_expression, proposed_entry_zone,
                     proposed_stop, proposed_target, proposed_time_exit, emitted,
-                    engine
+                    engine,
+                    entry_quality_status, entry_quality_flags,
+                    entry_quality_summary, entry_quality_risk_reward
                 )
                 VALUES (
                     %s, %s, %s, %s, %s, %s,
@@ -194,7 +226,8 @@ def _insert_candidates(
                     %s, %s,
                     %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s
+                    %s,
+                    %s, %s, %s, %s
                 )
                 """,
                 (
@@ -215,11 +248,13 @@ def _insert_candidates(
                     cand.proposed_time_exit,
                     False,
                     cand.engine,
+                    eq.status, eq.flags or None,
+                    eq.summary, eq.risk_reward,
                 ),
             )
             uid_map[(cand.engine, cand.symbol)] = uid
     conn.commit()
-    return uid_map
+    return uid_map, eq_map
 
 
 def _uids_for_symbol(
@@ -312,6 +347,7 @@ def _insert_recommendations(
     candidate_uid_map: dict[tuple[str, str], str],
     gate: GateResult,
     engine_scores: dict[str, dict[str, float]] | None = None,
+    entry_quality_map: dict[tuple[str, str], EntryQualityResult] | None = None,
 ) -> list[dict[str, Any]]:
     """Insert one recommendation row per approve / review / unavailable survivor.
 
@@ -332,6 +368,7 @@ def _insert_recommendations(
     with the list of all engines that picked the symbol in this run.
     """
     engine_scores = engine_scores or {}
+    entry_quality_map = entry_quality_map or {}
     emitted_rows: list[dict[str, Any]] = []
     with conn.cursor() as cur:
         for cand in survivors:
@@ -340,6 +377,7 @@ def _insert_recommendations(
                 continue
 
             uid = next_uid(conn, "recommendation")
+            eq = entry_quality_map.get((cand.engine, cand.symbol))
             gate_summary = decision.summary if decision.decision != "unavailable" else None
             reasoning = _compose_reasoning(cand, gate_summary)
             cur.execute(
@@ -385,13 +423,15 @@ def _insert_recommendations(
                 ),
             )
             pnl = _estimated_pnl(cand)
-            # Email rule: only LLM-approved ideas land in the "New ideas"
-            # section. Review-tagged items render in "Held for review";
-            # unavailable items render in their own "Algorithmic candidates
-            # not fully reviewed" subsection (so an LLM outage is not
-            # presented as an approved actionable idea). Rejected ideas
-            # never become recommendations.
-            should_email = decision.decision == "approve"
+            # Email rule: only LLM-approved ideas with passing entry
+            # quality land in "New ideas". An LLM-approved but entry-
+            # quality-watch candidate (the NDAQ/OXY shape) is routed
+            # to "Held for review" instead — never silently dropped,
+            # but never shown as Actionable either. Review/unavailable
+            # keep their existing routes. Rejected ideas don't become
+            # recommendations.
+            eq_watch = eq is not None and eq.is_watch
+            should_email = (decision.decision == "approve") and not eq_watch
             emitted_rows.append({
                 "rec_uid":           uid,
                 "symbol":            cand.symbol,
@@ -416,6 +456,12 @@ def _insert_recommendations(
                 "source_engines":    sorted(
                     engine_scores.get(cand.symbol, {cand.engine: 0}).keys()
                 ) if engine_scores else [cand.engine],
+                # Entry-quality fields surfaced so the email + status
+                # renderer can show "Watch / Poor Entry Quality" with
+                # the deterministic reason text.
+                "entry_quality_status":  eq.status if eq else None,
+                "entry_quality_summary": eq.summary if eq else None,
+                "entry_quality_flags":   list(eq.flags) if eq else [],
                 **pnl,
             })
     conn.commit()
@@ -628,8 +674,8 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
             outcomes = classify_outcomes(
                 all_candidates, conviction_threshold=conviction_threshold,
             )
-            candidate_uid_by_engine_symbol = _insert_candidates(
-                conn, run_uid, all_candidates, outcomes,
+            candidate_uid_by_engine_symbol, entry_quality_by_engine_symbol = (
+                _insert_candidates(conn, run_uid, all_candidates, outcomes)
             )
 
             # Per-engine top-N selection → dedup to unique-by-symbol
@@ -680,6 +726,7 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
             emitted_rows = _insert_recommendations(
                 conn, run_uid, top_n, candidate_uid_by_engine_symbol, gate,
                 engine_scores=engine_scores,
+                entry_quality_map=entry_quality_by_engine_symbol,
             )
             # Mark every engine's candidate row for emitted symbols —
             # all engines that picked the symbol contributed to the
@@ -781,15 +828,23 @@ def execute(when_kind: str, *, dry_run: bool = False) -> dict[str, Any]:
                 ),
             )
 
-            # Email layout: approved → "New ideas"; review-tagged →
-            # "Held for review"; unavailable (LLM gate failed) → its own
-            # "Algorithmic candidates not fully reviewed" subsection.
-            # Keeping unavailable out of New ideas means an LLM outage is
-            # never presented as an approved actionable idea — but the
+            # Email layout: approved + entry-quality pass → "New ideas".
+            # Approved + entry-quality watch (NDAQ/OXY shape) → "Held for
+            # review" with the deterministic poor-entry-quality reason.
+            # Review-tagged → "Held for review". Unavailable (LLM gate
+            # failed) → its own "Algorithmic candidates not fully reviewed"
+            # subsection. Rejected ideas never reach this code path. All
             # candidate/recommendation rows + llm_trace still persist for
-            # full audit and lifecycle flow.
+            # full audit and lifecycle flow regardless of routing.
             email_ideas = [r for r in emitted_rows if r.get("should_email")]
-            review_ideas = [r for r in emitted_rows if r.get("llm_gate") == "review"]
+            review_ideas = [
+                r for r in emitted_rows
+                if r.get("llm_gate") == "review"
+                or (
+                    r.get("llm_gate") == "approve"
+                    and r.get("entry_quality_status") == "watch"
+                )
+            ]
             unavailable_ideas = [
                 r for r in emitted_rows if r.get("llm_gate") == "unavailable"
             ]

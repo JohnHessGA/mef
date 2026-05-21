@@ -155,6 +155,8 @@ def _fetch_recommendations(run_uid: str) -> list[dict[str, Any]]:
                        c.engine,
                        c.llm_gate_decision, c.llm_gate_issue_type,
                        c.llm_gate_key_judgment,
+                       c.entry_quality_status, c.entry_quality_summary,
+                       c.entry_quality_flags, c.entry_quality_risk_reward,
                        (c.feature_json->>'close')::numeric AS close,
                        us.company_name
                   FROM mef.recommendation r
@@ -197,15 +199,20 @@ def _fetch_etf_posture() -> list[Any]:
 def _classify_actionable(rec: dict[str, Any]) -> str:
     """Return 'actionable' or 'watch' for a recommendation row.
 
-    Primary signal is `candidate.llm_gate_decision`:
-      - 'approve'                    → actionable
-      - 'review' | 'unavailable' | NULL → watch
+    Two signals, both have to pass for 'actionable':
+      - candidate.llm_gate_decision == 'approve'
+      - candidate.entry_quality_status != 'watch'  (mig 015; v1 only flags
+        the strong-trend / weak-R:R / no-pullback NDAQ/OXY shape).
 
-    The pipeline never inserts 'reject' rows into `recommendation`, so
-    that case can't reach the status view in practice.
+    Anything else lands in 'watch'. The pipeline never inserts 'reject'
+    rows into `recommendation`, so that case can't reach this view.
     """
     decision = (rec.get("llm_gate_decision") or "").strip().lower()
-    return "actionable" if decision == "approve" else "watch"
+    if decision != "approve":
+        return "watch"
+    if (rec.get("entry_quality_status") or "") == "watch":
+        return "watch"
+    return "actionable"
 
 
 _WATCH_REASON_PATTERNS = [
@@ -231,11 +238,18 @@ _ISSUE_TYPE_LABELS = {
 def _watch_status(rec: dict[str, Any]) -> str:
     """Pick a short reason label for a Watch entry.
 
-    Prefers the structured `llm_gate_issue_type` when set; falls back to
-    keyword detection in `reasoning_summary` + `llm_gate_key_judgment`;
-    final fallback for `unavailable`/NULL gate decisions is 'Unreviewed';
-    everything else gets 'Held for review'.
+    Order of precedence:
+      1. Entry Quality Overlay (mig 015) — if the deterministic engine
+         demoted an LLM-approved candidate as poor entry quality, that
+         is the dominant reason; show "Poor Entry Quality".
+      2. Structured `llm_gate_issue_type` (when set).
+      3. Keyword detection in `reasoning_summary` + `llm_gate_key_judgment`.
+      4. 'Unreviewed' for `unavailable`/NULL gate decisions.
+      5. 'Held for review' as the default.
     """
+    if (rec.get("entry_quality_status") or "") == "watch":
+        return "Poor Entry Quality"
+
     issue = (rec.get("llm_gate_issue_type") or "").strip().lower()
     if issue and issue != "none" and issue in _ISSUE_TYPE_LABELS:
         return _ISSUE_TYPE_LABELS[issue]
@@ -371,7 +385,14 @@ def _format_idea_block(rec: dict[str, Any], action_label: str, status_label: str
         f"{_fmt_conf(rec.get('confidence'))} conv"
     )
 
-    detail = rec.get("llm_gate_key_judgment") or rec.get("reasoning_summary") or ""
+    # When the Entry Quality Overlay demoted this candidate (LLM said
+    # approve, deterministic engine said the entry shape is poor), use
+    # the entry-quality summary as the detail line so the reader sees
+    # the actual reason for the demotion, not the LLM's now-stale color.
+    if (rec.get("entry_quality_status") or "") == "watch" and rec.get("entry_quality_summary"):
+        detail = rec["entry_quality_summary"]
+    else:
+        detail = rec.get("llm_gate_key_judgment") or rec.get("reasoning_summary") or ""
     detail_line = f"    {_truncate(detail, 96)}" if detail else ""
 
     return [head, plan] + ([detail_line] if detail_line else [])
