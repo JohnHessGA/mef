@@ -365,8 +365,8 @@ The default `mef status` should show only notable pullback items and a quiet cou
 Example:
 
 ```text
-CORE PULLBACK WATCHLIST
-=======================
+CORE PULLBACK RADAR
+===================
 
 BUY ZONE ACTIVE
   SPY   $xxx.xx  starter $yyy  better $zzz
