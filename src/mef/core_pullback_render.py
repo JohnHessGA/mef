@@ -19,6 +19,23 @@ from mef.core_pullback import (
     STATUS_PULLBACK_FORMING,
     STATUS_THESIS_BROKEN_REVIEW,
 )
+from mef.display_format import fmt_dollar_whole, fmt_pct_human
+
+
+# Statuses for which it would be misleading to render buy levels — the
+# headline of the row is "do not buy yet" or "review before buying", so
+# numerical entry/scale-in levels would suggest false precision.
+_SUPPRESS_LEVELS_STATUSES = {
+    STATUS_FALLING_KNIFE_WAIT,
+    STATUS_THESIS_BROKEN_REVIEW,
+}
+
+# Suffix appended to the reason line when the row would otherwise have
+# rendered levels but is being suppressed by status.
+_SUPPRESSED_LEVEL_SUFFIX = {
+    STATUS_THESIS_BROKEN_REVIEW: " — no buy levels shown",
+    STATUS_FALLING_KNIFE_WAIT:   " — wait before setting buy levels",
+}
 
 
 # Safety cap so a market-wide selloff doesn't dump 50+ rows into the
@@ -101,19 +118,52 @@ def _sort_key_deepest_first(sig: PullbackSignal) -> tuple[float, float, str]:
 
 def _format_signal_block(sig: PullbackSignal) -> list[str]:
     """Two-line block per notable signal: header (symbol + levels) + reason."""
-    head = f"  {sig.symbol:<6} {_fmt_price(sig.close)}"
-    parts = []
-    if sig.starter_buy_level is not None:
-        parts.append(f"starter {_fmt_price(sig.starter_buy_level)}")
-    if sig.better_buy_level is not None:
-        parts.append(f"better {_fmt_price(sig.better_buy_level)}")
-    if sig.deep_buy_level is not None:
-        parts.append(f"deep {_fmt_price(sig.deep_buy_level)}")
-    if parts:
-        head = f"{head}  {' · '.join(parts)}"
+    head = f"  {sig.symbol:<6} {fmt_dollar_whole(sig.close)}"
+
+    if sig.status not in _SUPPRESS_LEVELS_STATUSES:
+        displayable = _displayable_levels(sig)
+        if displayable:
+            head = f"{head}  " + " · ".join(
+                f"{label} {fmt_dollar_whole(v)}" for label, v in displayable
+            )
 
     reason = _compose_reason_line(sig)
     return [head, f"        {reason}"]
+
+
+def _displayable_levels(sig: PullbackSignal) -> list[tuple[str, float]]:
+    """Return (label, value) pairs in display order, with two safety filters.
+
+    1. Drop any level that is not strictly below ``close``. A "buy level"
+       at or above the current price reads as "buy at a higher price",
+       which is nonsense for a pullback report.
+    2. Drop any level that breaks the natural monotone descent
+       starter > better > deep. The three levels can use different
+       anchors (high_63d vs recovered peak_252d) and occasionally land
+       out of order — better to suppress the misleading one than to
+       label it with anchor-context that doesn't help a quick scan.
+    """
+    close = sig.close
+    if close is None:
+        return []
+
+    raw = [
+        ("starter", sig.starter_buy_level),
+        ("better",  sig.better_buy_level),
+        ("deep",    sig.deep_buy_level),
+    ]
+    candidates = [(label, float(v)) for label, v in raw
+                  if v is not None and float(v) < close]
+
+    # Enforce strictly descending values across the kept labels.
+    out: list[tuple[str, float]] = []
+    prev = float("inf")
+    for label, value in candidates:
+        if value < prev:
+            out.append((label, value))
+            prev = value
+        # else: drop this level — keeps the rendered set monotone.
+    return out
 
 
 def _compose_reason_line(sig: PullbackSignal) -> str:
@@ -127,13 +177,13 @@ def _compose_reason_line(sig: PullbackSignal) -> str:
     dd252 = sig.drawdown_252d
     if dd63 is not None and dd252 is not None:
         if dd252 < dd63:
-            pieces.append(f"down {_fmt_pct(dd252)} from 252d high")
+            pieces.append(f"down {fmt_pct_human(dd252)} from 252d high")
         else:
-            pieces.append(f"down {_fmt_pct(dd63)} from 63d high")
+            pieces.append(f"down {fmt_pct_human(dd63)} from 63d high")
     elif dd63 is not None:
-        pieces.append(f"down {_fmt_pct(dd63)} from 63d high")
+        pieces.append(f"down {fmt_pct_human(dd63)} from 63d high")
     elif dd252 is not None:
-        pieces.append(f"down {_fmt_pct(dd252)} from 252d high")
+        pieces.append(f"down {fmt_pct_human(dd252)} from 252d high")
 
     # Trend / stabilization headline
     if sig.status == STATUS_THESIS_BROKEN_REVIEW:
@@ -155,17 +205,5 @@ def _compose_reason_line(sig: PullbackSignal) -> str:
         for c in sig.cautions[:2]:
             pieces.append(f"⚠ {c}")
 
-    return "; ".join(pieces) if pieces else sig.display_label
-
-
-def _fmt_price(v: float | None) -> str:
-    if v is None:
-        return "$?"
-    return f"${v:,.2f}"
-
-
-def _fmt_pct(v: float | None) -> str:
-    """Render a drawdown value as a positive percentage (e.g. -0.064 → 6.4%)."""
-    if v is None:
-        return "?"
-    return f"{abs(v) * 100:.1f}%"
+    line = "; ".join(pieces) if pieces else sig.display_label
+    return line + _SUPPRESSED_LEVEL_SUFFIX.get(sig.status, "")
