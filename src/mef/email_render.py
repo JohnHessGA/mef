@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from mef.aft_track import MEF_TRACK_LABEL
+
 
 @dataclass(frozen=True)
 class RenderedEmail:
@@ -26,7 +28,7 @@ class RenderedEmail:
 # was nominally scheduled as premarket or postmarket. The two parameters
 # remain on the renderer for caller stability and DB compatibility, but
 # they no longer change subject/header wording.
-_NEUTRAL_SUBJECT_PREFIX = "MEF daily report"
+_NEUTRAL_SUBJECT_PREFIX = f"MEF daily report — {MEF_TRACK_LABEL}"
 
 
 def _fmt_money(v: float | None) -> str:

@@ -28,6 +28,7 @@ import re
 from datetime import date, datetime
 from typing import Any
 
+from mef.aft_track import MEF_TRACK_LABEL
 from mef.db.connection import connect_mefdb, connect_shdb
 
 
@@ -341,6 +342,7 @@ def _render_header(r: dict[str, Any]) -> list[str]:
         parts.append(f"universe {u['stocks']} stocks / {u['etfs']} ETFs")
     return [
         "MEF — Muse Engine Forecaster",
+        f"Investing Track: {MEF_TRACK_LABEL}",
         " · ".join(parts),
     ]
 
