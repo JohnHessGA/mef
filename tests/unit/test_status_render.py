@@ -264,10 +264,14 @@ def _build_report_dict():
     }
 
 
-def test_full_render_includes_core_pullback_watchlist_header():
+def test_full_render_includes_core_pullback_radar_header():
     from mef.commands.status import _render
     body = _render(_build_report_dict())
-    assert "CORE PULLBACK WATCHLIST" in body
+    # Section title was renamed 2026-05-21 ("WATCHLIST" → "RADAR")
+    # to match the Growth Opportunity Finder / Core Pullback Radar
+    # naming alignment. Underlying module / table names unchanged.
+    assert "CORE PULLBACK RADAR" in body
+    assert "CORE PULLBACK WATCHLIST" not in body
 
 
 def test_full_render_does_not_include_etf_posture_section():

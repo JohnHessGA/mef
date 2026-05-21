@@ -315,16 +315,19 @@ def _render(r: dict[str, Any]) -> str:
 
 
 def _render_pullback_watchlist(r: dict[str, Any]) -> list[str]:
-    """Render the Job 2 section. ``None`` signals come from an outage
-    inside _gather and render as a one-line "(unavailable)" note."""
+    """Render the Core Pullback Radar section. ``None`` signals come
+    from an outage inside _gather and render as a one-line
+    "(unavailable)" note."""
+    from mef.core_pullback_render import (
+        SECTION_TITLE, SECTION_UNDERLINE, render_section,
+    )
     signals = r.get("pullback_signals")
     if signals is None:
         return [
-            "CORE PULLBACK WATCHLIST",
-            "=======================",
+            SECTION_TITLE,
+            SECTION_UNDERLINE,
             "  (unavailable — repository or SHDB read failed; see logs)",
         ]
-    from mef.core_pullback_render import render_section
     return render_section(signals)
 
 

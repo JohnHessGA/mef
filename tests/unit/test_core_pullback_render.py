@@ -39,7 +39,11 @@ def _sig(symbol: str, status: str, **kw) -> PullbackSignal:
 def test_empty_watchlist_renders_a_friendly_marker():
     out = render_section([])
     text = "\n".join(out)
-    assert "CORE PULLBACK WATCHLIST" in text
+    # Section title was renamed 2026-05-21 ("WATCHLIST" → "RADAR")
+    # to match the Growth Opportunity Finder / Core Pullback Radar
+    # naming alignment. Underlying module / table names unchanged.
+    assert "CORE PULLBACK RADAR" in text
+    assert "CORE PULLBACK WATCHLIST" not in text
     assert "no watchlist symbols loaded" in text
 
 

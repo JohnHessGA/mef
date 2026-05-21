@@ -22,6 +22,15 @@ from mef.core_pullback import (
 from mef.display_format import fmt_dollar_whole, fmt_pct_human
 
 
+# User-visible section title. Was "CORE PULLBACK WATCHLIST" through
+# 2026-05-21; renamed alongside the broader Job 1 / Job 2 → Growth
+# Opportunity Finder / Core Pullback Radar naming alignment. The
+# underlying module / table / constant names are intentionally
+# unchanged — see ~/repos/mef/CLAUDE.md.
+SECTION_TITLE = "CORE PULLBACK RADAR"
+SECTION_UNDERLINE = "=" * len(SECTION_TITLE)
+
+
 # Statuses for which it would be misleading to render buy levels — the
 # headline of the row is "do not buy yet" or "review before buying", so
 # numerical entry/scale-in levels would suggest false precision.
@@ -65,8 +74,8 @@ def render_section(signals: list[PullbackSignal]) -> list[str]:
     """Return the rendered section as a list of text lines (no trailing blank)."""
     if not signals:
         return [
-            "CORE PULLBACK WATCHLIST",
-            "=======================",
+            SECTION_TITLE,
+            SECTION_UNDERLINE,
             "  (no watchlist symbols loaded)",
         ]
 
@@ -79,8 +88,8 @@ def render_section(signals: list[PullbackSignal]) -> list[str]:
             quiet += 1
 
     lines: list[str] = [
-        "CORE PULLBACK WATCHLIST",
-        "=======================",
+        SECTION_TITLE,
+        SECTION_UNDERLINE,
     ]
     notable_total = sum(len(v) for v in by_status.values())
     if notable_total == 0:
