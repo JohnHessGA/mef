@@ -1,22 +1,56 @@
 # MEF Design Spec
 
-Version: 2026-04-19 (CLI surface updated 2026-05-06; current-reality banner added 2026-05-20)
+Version: 2026-04-19 (CLI surface updated 2026-05-06; current-reality banner added 2026-05-20; naming + Growth Opportunity Finder v2 direction added 2026-05-21)
 Companion doc: `docs/README_mef.md` (build specification, scope, UX)
 
 This document is the **technical** view of MEF: components, data model, pipeline, scoring, LLM policy, and MEFDB schema. The README is the source of truth for scope and user experience; this spec is the source of truth for architecture.
+
+> **2026-05-21 — naming alignment.** What the body of this spec calls
+> "Job 1" is now **Growth Opportunity Finder**. What it calls "Job 2"
+> (Core Pullback Watchlist / Growth Pullback Radar) is now **Core
+> Pullback Radar**. MEF serves **Investing Track 4 — Capital
+> Appreciation.** MEF is **not** the covered-call / cash-secured-put
+> recommendation engine — those workflows belong to CCW. Where the body
+> describes covered-call or cash-secured-put expressions, treat as
+> legacy lifecycle context, not as a direction for new MEF features.
+
+> **2026-05-21 — Growth Opportunity Finder v2 direction (not yet implemented).**
+> The plan-construction model comparison
+> (`scripts/research/mef_plan_geometry_compare.py`,
+> `/mnt/aftdata/rse/data/mef_plan_geometry/summary.md`) confirmed that
+> the current fixed-percentage plan builder mechanically produces R/R
+> ≈ 1.5 by construction. The leading future direction is:
+>
+> - **Setup identification** at scoring time.
+> - **Structural plan construction (Model B)** — swing-low stops,
+>   prior-high targets, volatility-aware bands — anchored to chart
+>   structure rather than fixed percentages.
+> - **Plan classification** as `buyable_now` / `wait_for_entry` /
+>   `no_compelling_plan`.
+> - **Deterministic plan quality can override LLM approval.** A weak
+>   plan stays out of Actionable Stock Ideas even when the LLM says
+>   approve. The existing Entry Quality Overlay (mig 015) is the first
+>   in-place mechanism; Model B is the future expansion.
+> - **`wait_for_entry` is a first-class concept.** When the setup is
+>   good but current price isn't, MEF should classify and surface a
+>   future entry rather than force a buy-now plan.
+>
+> Implementation is **not** part of this naming-alignment pass. Until
+> Model B lands, the body of this spec describes the v1 ranker + plan
+> builder, which remains the current production behavior.
 
 > **2026-05-20 — current-reality banner.** Several behaviors described
 > further down have evolved. Where the body of this spec conflicts with
 > this banner, the banner wins:
 >
-> - **Universe is DB-backed, not markdown-loaded.** The Job 1 305-stock +
->   20-ETF universe lives in `mef.universe_stock` / `mef.universe_etf`
+> - **Universe is DB-backed, not markdown-loaded.** The Growth Opportunity
+>   Finder 305-stock + 20-ETF universe lives in `mef.universe_stock` / `mef.universe_etf`
 >   and is seeded by SQL migrations in `sql/mefdb/`. The legacy
 >   `mef universe load` markdown-parser path was removed. No runtime or
 >   loader code reads `notes/` or `docs/` markdown for universe data.
 >   See `docs/focus-universe-us-stocks-final.md` / `docs/core-us-etfs-daily-final.md`
 >   for human-readable background only.
-> - **Job 2 (Core Pullback Watchlist) metadata is DB-backed.** Tables
+> - **Core Pullback Radar metadata is DB-backed.** Tables
 >   `mef.core_pullback_tier` (5 rows) and `mef.core_pullback_watchlist`
 >   (10 ETFs + 50 stocks) are seeded by `sql/mefdb/013_core_pullback_watchlist.sql`.
 >   The pullback-snapshot table is created but empty until the engine

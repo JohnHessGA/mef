@@ -12,15 +12,15 @@ This document records a future MEF enhancement: using CIA signals as a support/c
 
 CIA — Congressional-Insider Alerts — is an AFT advisory stream that surfaces investigation leads from congressional, insider, institutional, whale, and similar actor activity.
 
-MEF should eventually be able to display CIA context when it is relevant to a MEF opportunity, especially a Core Pullback Watchlist alert.
+MEF should eventually be able to display CIA context when it is relevant to a MEF opportunity, especially a Core Pullback Radar alert.
 
 ---
 
 ## Current Decision
 
-CIA is **not** part of the initial MEF Core Pullback Watchlist implementation.
+CIA is **not** part of the initial MEF Core Pullback Radar implementation.
 
-The first implementation of MEF Job 2 should be deterministic and should rely on market data, pullback size, trend health, stabilization, risk/reward, and event caution.
+The first implementation of Core Pullback Radar (previously called Job 2) is deterministic and relies on market data, pullback size, trend health, stabilization, risk/reward, and event caution.
 
 CIA should be parked as a future overlay because:
 
@@ -117,9 +117,9 @@ Suggested guardrails:
 | Fresh sell lead on Tier 4 stock | Stronger caution; may require stabilization/review |
 | Stale lead | Ignore or show in details only |
 
-For Job 1, a future bonus/penalty should be small, such as +/-0.02 to +/-0.05, and never enough to turn a poor setup into an actionable idea.
+For the Growth Opportunity Finder (was Job 1), a future bonus/penalty should be small, such as +/-0.02 to +/-0.05, and never enough to turn a poor setup into an actionable idea.
 
-For Job 2, CIA should not change deterministic buy levels.
+For Core Pullback Radar (was Job 2), CIA should not change deterministic buy levels.
 
 ---
 
@@ -127,7 +127,7 @@ For Job 2, CIA should not change deterministic buy levels.
 
 Do not integrate CIA into MEF until:
 
-1. Core Pullback Watchlist deterministic output is working and trusted.
+1. Core Pullback Radar deterministic output is working and trusted.
 2. CIA lead synthesis is implemented.
 3. CIA scoring/actor-edge fields are stable enough to consume.
 4. CIA source freshness is reliable enough to display.

@@ -4,11 +4,29 @@ Working instructions for code assistants in the MEF repo.
 
 For MEF's place in AFT (alongside MDC, UDC, RSE, DAS, IRA Guard, Overwatch), see `~/repos/CLAUDE.md` and `~/repos/notes/` — those are the system-wide references.
 
+## What MEF is (and isn't)
+
+**MEF serves Investing Track 4 — Capital Appreciation.** It identifies
+growth opportunities and monitors quality names for buyable pullbacks.
+
+MEF has two functions:
+
+| Name | Previously called | Purpose |
+|---|---|---|
+| **Growth Opportunity Finder** | Job 1 / Opportunistic Growth Ideas | Find capital-appreciation candidates and decide whether the setup is worth acting on now. |
+| **Core Pullback Radar** | Job 2 / Core Pullback Watchlist | Monitor a DB-backed list of preferred stocks/ETFs and surface notable pullback statuses. |
+
+**MEF is not the covered-call or cash-secured-put recommendation engine.**
+Options-income workflows belong to **CCW** (`~/repos/ccw/`). MEF may render
+income-style expressions on legacy lifecycle paths, but new MEF logic
+should not add covered-call / cash-secured-put recommendation features —
+route that work through CCW instead.
+
 ## Status
 
-- **Introduced:** 2026-04-19 — first top-level *forecasting/recommendation* application stream in AFT, peer to IRA Guard.
-- **Operational since 2026-04-20:** ranker, layered gating, LLM gate, lifecycle, paper/shadow scoring, two-email-per-day rendering. MEFDB populated; cron-driven premarket + postmarket runs.
-- **Current focus (2026-05-20→):** major rewrite. The pre-rewrite doc set has been snapshotted into `docs/bu20260520/` and a fresh doc set is being authored under `docs/`. Code is intact and continues to run; spec/policy text is in flight.
+- **Introduced:** 2026-04-19 — first top-level *capital-appreciation* application stream in AFT, peer to IRA Guard.
+- **Operational since 2026-04-20:** ranker, layered gating, LLM gate, lifecycle, paper/shadow scoring, two-email-per-day rendering. MEFDB populated; cron-driven daily runs.
+- **Current focus (2026-05-20→):** doc refresh + Growth Opportunity Finder v2 direction. The pre-rewrite doc set has been snapshotted into `docs/bu20260520/` and a fresh doc set is being authored under `docs/`. Code is intact and continues to run; spec/policy text is in flight.
 
 ## Authoritative design docs
 
@@ -28,13 +46,13 @@ For MEF's place in AFT (alongside MDC, UDC, RSE, DAS, IRA Guard, Overwatch), see
 
 These are load-bearing. Stop and ask before crossing any of them.
 
-0. **Operational symbol lists live in MEFDB.** Runtime and loader code must not read operational symbol lists from markdown, `docs/`, or `notes/`. The Job 1 universe lives in `mef.universe_stock` / `mef.universe_etf`; the Job 2 Core Pullback Watchlist lives in `mef.core_pullback_tier` / `mef.core_pullback_watchlist`. Both are seeded by SQL migrations in `sql/mefdb/`. YAML (`config/mef.yaml`) holds settings, thresholds (when not DB-backed), feature flags, rendering options, email/logging — not symbol lists. Documentation files in `docs/` explain the lists but never feed them into the tool.
+0. **Operational symbol lists live in MEFDB.** Runtime and loader code must not read operational symbol lists from markdown, `docs/`, or `notes/`. The Growth Opportunity Finder universe lives in `mef.universe_stock` / `mef.universe_etf`; the Core Pullback Radar watchlist lives in `mef.core_pullback_tier` / `mef.core_pullback_watchlist`. Both are seeded by SQL migrations in `sql/mefdb/`. YAML (`config/mef.yaml`) holds settings, thresholds (when not DB-backed), feature flags, rendering options, email/logging — not symbol lists. Documentation files in `docs/` explain the lists but never feed them into the tool.
 1. **Fixed 305+20 universe.** No broad-market screening, no dynamic universe expansion in v1. (Operator-curated bumps — like the 2026-05-05 15→20 ETF expansion adding VUG/SCHG/SPYG/QUAL/ONEQ — are allowed; automated/screen-driven expansion is not. Current membership lives in `mef.universe_stock` / `mef.universe_etf`; the pre-rewrite universe lists are archived under `docs/bu20260520/`.)
 2. **No DAS dependency.** DAS does not yet exist; MEF reads SHDB directly. Revisit when DAS is real.
 3. **No RSE dependency in v1.** Revisit once RSDB has useful outputs.
 4. **No backtesting.** Historical strategy simulation belongs elsewhere (same boundary RSE enforces).
 5. **Advisory only.** No broker integration, no automated trade placement.
-6. **Only two notifications per trading day.** The pre-market email and the post-market email. No SMS, no per-event pings, no extra channels.
+6. **Only two notifications per trading day.** Up to two scheduled `mef run --send-email` invocations per trading day. MEF has a single run behavior; scheduling decides timing. No SMS, no per-event pings, no extra channels.
 7. **Ranker decides emission; LLM reviews.** The deterministic ranker alone decides whether to emit ideas and how many. The LLM adds color and flags concerns but does not generate candidates or change entry/exit prices.
 8. **Lightweight over comprehensive.** If a design choice ships the daily loop sooner at the cost of near-term elegance, ship. This is intentionally a smaller tool than DAS.
 
@@ -64,10 +82,14 @@ These are load-bearing. Stop and ask before crossing any of them.
 
 ## CLI surface (target)
 
+MEF has a single run behavior. Scheduling decides when it fires; the
+tool does not branch on the nominal window.
+
 | Command | Purpose |
 |---|---|
-| `mef premarket-run` / `mef postmarket-run` | Execute one scheduled run with email enabled (cron entry points). Sugar for `mef run --when X --send-email`. |
-| `mef run [--when {premarket\|postmarket}] [--send-email]` | Run the pipeline manually. `--when` is informational only; the runtime does not branch on it. |
+| `mef` (bare) | Defaults to `mef status` — investing report. |
+| `mef run [--send-email]` | Canonical run. Writes a `daily_run`, candidates, recommendations; sends the email when `--send-email` is passed. |
+| `mef premarket-run` / `mef postmarket-run` | **Deprecated** compatibility aliases for `mef run --send-email`. Same code path; preserved for legacy cron lines. Print a deprecation notice. |
 | `mef status` | Environment, DB connectivity, data freshness, last run summary |
 | `mef init-db` | Apply MEFDB migrations (idempotent) |
 | `mef universe [load]` | Show universe; `load` syncs `mef.universe_stock` / `mef.universe_etf` from the operator-curated universe definitions |
@@ -142,7 +164,21 @@ Fail-silent.
 
 ## Notifications
 
-Route via MDC's `notify.py --source MEF`. **Only** the two scheduled daily emails — no other notifications.
+Route via MDC's `notify.py --source MEF`. **Only** the up-to-two scheduled daily emails — no other notifications.
+
+## Out of scope for MEF (do these belong in CCW or elsewhere?)
+
+MEF is the **Capital Appreciation** stream. Workflows that are not MEF's
+job:
+
+- **Covered-call recommendations** → CCW (`~/repos/ccw/`).
+- **Cash-secured-put recommendations** → CCW.
+- **Options-income decisioning** of any kind → CCW.
+- **Defensive stop-loss recommendations on existing holdings** → IRA Guard (`~/repos/iraguard/`).
+- **Plain-English ad-hoc market research** → RSE (`~/repos/rse/`).
+
+If a new MEF feature feels like it belongs in one of those tools,
+stop and ask before building it inside MEF.
 
 ## Legacy context
 

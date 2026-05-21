@@ -1,14 +1,20 @@
-# MEF Core Pullback Watchlist
+# MEF Core Pullback Radar
 
-Version: 2026-05-20 draft
-Status: Design draft — documentation first, code next
-Owner: MEF
+Version: 2026-05-21 (naming alignment)
+Status: v1 operational — DB-backed watchlist, deterministic engine, rendered in `mef status`
+Owner: MEF (Investing Track 4 — Capital Appreciation)
+Filename note: this file is `docs/mef_core_pullback_watchlist.md` for
+filename continuity. The doc itself is the canonical reference for
+**Core Pullback Radar** (previously called **Job 2** / **Core Pullback
+Watchlist** / **Growth Pullback Radar**).
 
 ---
 
 ## Purpose
 
-The Core Pullback Watchlist is MEF Job 2.
+Core Pullback Radar is one of MEF's two functions, alongside the **Growth
+Opportunity Finder** (previously called "Job 1"). It is part of MEF's
+mandate as Investing Track 4 — Capital Appreciation.
 
 It monitors selected ETFs and stocks every day and raises visibility when a meaningful pullback may create a practical buying opportunity.
 
@@ -22,16 +28,19 @@ The key question:
 
 ## Relationship to Existing MEF
 
-MEF Job 1 currently produces Opportunistic Growth Ideas using deterministic engines, selection, and an LLM review gate.
+The MEF **Growth Opportunity Finder** produces capital-appreciation
+ideas using deterministic engines, selection, and an LLM review gate.
 
-The Core Pullback Watchlist is separate.
+Core Pullback Radar is separate.
 
-| MEF job | Purpose | Selection style |
+| MEF function | Purpose | Selection style |
 |---|---|---|
-| Job 1 — Opportunistic Growth Ideas | Find buyable new ideas today | Ranker/engine driven |
-| Job 2 — Core Pullback Watchlist | Monitor selected assets for pullback buy zones | Standing configured watchlist |
+| Growth Opportunity Finder | Find buyable new ideas today (or "wait for entry" candidates) | Ranker/engine driven |
+| Core Pullback Radar | Monitor selected assets for pullback buy zones | Standing configured watchlist |
 
-Job 2 symbols should not need to win a daily top-N competition. They are monitored every run because the user wants visibility when they pull back.
+Core Pullback Radar symbols do not need to win a daily top-N competition.
+They are monitored every run because the user wants visibility when they
+pull back.
 
 ---
 
@@ -170,7 +179,7 @@ These can be useful pullback opportunities, but MEF should demand deeper discoun
 
 ## Evidence Families
 
-Job 2 should use evidence already available in SHDB where possible.
+Core Pullback Radar should use evidence already available in SHDB where possible.
 
 ### Pullback from recent highs
 
@@ -262,7 +271,7 @@ The implementation should prefer config-driven thresholds by tier and asset clas
 
 ## Suggested Buy Levels
 
-Job 2 should provide zones, not one magic price.
+Core Pullback Radar should provide zones, not one magic price.
 
 Suggested levels:
 
@@ -384,7 +393,7 @@ Do not display all 60 symbols every day unless a future details command asks for
 
 ## LLM Boundary
 
-The LLM is not used in Core Pullback Watchlist v1.
+The LLM is not used in Core Pullback Radar v1.
 
 Specifically, the LLM must not:
 
@@ -433,7 +442,7 @@ src/mef/core_pullback.py        (not yet implemented)
 
 ### Persistence model (already in place as of 2026-05-20)
 
-Job 2 metadata lives in MEFDB. SQL migration
+Core Pullback Radar metadata lives in MEFDB. SQL migration
 `sql/mefdb/013_core_pullback_watchlist.sql` creates three tables in the
 `mef` schema:
 
@@ -494,7 +503,7 @@ Minimum tests:
 - large unstable selloff produces `FALLING_KNIFE_WAIT`,
 - broken trend produces `THESIS_BROKEN_REVIEW`,
 - quiet symbols are summarized rather than all rendered,
-- LLM is not called by Job 2.
+- LLM is not called by Core Pullback Radar.
 
 ---
 
