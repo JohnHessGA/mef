@@ -75,8 +75,14 @@ These are load-bearing. Stop and ask before crossing any of them.
   - `mefdb` — MEF's own database (schema `mef`, owner `mef_user`) — created and in active use
   - `shdb` — primary data source (read-only, same PG instance)
   - `overwatch` — telemetry (fail-silent writes)
-- **Secrets:** `config/postgres.secrets.yaml` (gitignored) with `mefdb`, `shdb`, `overwatch` sections. No env-var fallback for passwords. See `~/repos/notes/secrets-conventions.md`.
+- **Secrets:** `config/postgres.secrets.yaml` (gitignored) with `mefdb`, `shdb`, `overwatch` sections. No env-var fallback for passwords. See the "Secrets — no literal passwords in tracked files" section below and `~/repos/notes/secrets-conventions.md`.
 - **Application config:** `config/mef.yaml` (gitignored).
+
+## Secrets — no literal passwords in tracked files
+
+Credentials live in `config/postgres.secrets.yaml` (gitignored). See `~/repos/notes/secrets-conventions.md` for the full policy and replacement patterns A–E.
+
+**Hard rule:** never type a literal password into any tracked file. Not Python, not shell scripts, not SQL bootstrap DDL, not SQL comments, not markdown code blocks. The 2026-05-23 cross-repo audit cleared every existing literal across the eleven AFT repos using the conventions doc patterns; don't reintroduce them. If you find yourself typing one, stop and use the relevant pattern (Python via `load_postgres_config()`; shell/SQL-comment/markdown via the `grep -A1 ... config/postgres.secrets.yaml` extraction; bootstrap DDL via psql `:'role_password'` substitution + `ALTER ROLE`).
 - **Data root:** `/mnt/aftdata/` (native ext4 VHDX). MEF generated artifacts (if any) live under `/mnt/aftdata/mef/`.
 - **Logs:** `/mnt/aftdata/logs/mef/`.
 

@@ -2,12 +2,28 @@
 -- SHDB schemas (mart, shdb) plus CONNECT on overwatch so `mef status` can
 -- reach all three databases.
 --
--- Run once as postgres superuser:
---     sudo -u postgres psql -f ~/repos/mef/sql/mef_bootstrap.sql
+-- Run once as postgres superuser, passing the mef_user password from the
+-- gitignored secrets file (see ~/repos/notes/secrets-conventions.md):
 --
--- This script is idempotent. Safe to re-run.
+--     sudo -u postgres psql \
+--       -v mef_user_password="$(grep -A1 '^mefdb:' config/postgres.secrets.yaml \
+--                              | grep password | awk '{print $2}' | tr -d \"'\\\"\")" \
+--       -f sql/mef_bootstrap.sql
+--
+-- This script is idempotent. Safe to re-run. Role is created without a
+-- password (idempotent CREATE) and the password is then set/updated via
+-- ALTER ROLE — psql variable substitution works there but not inside
+-- DO $$ ... $$ bodies.
 
 \set ON_ERROR_STOP on
+
+\if :{?mef_user_password}
+\else
+  \echo ''
+  \echo 'ERROR: -v mef_user_password=<pw> required.'
+  \echo '       Source from config/postgres.secrets.yaml — see secrets-conventions.md.'
+  \quit
+\endif
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 1. mef_user role
@@ -15,12 +31,14 @@
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mef_user') THEN
-        CREATE ROLE mef_user WITH LOGIN PASSWORD 'mef_local_2026';
-        RAISE NOTICE 'Created role mef_user';
+        CREATE ROLE mef_user WITH LOGIN;
+        RAISE NOTICE 'Created role mef_user (password will be set below)';
     ELSE
-        RAISE NOTICE 'Role mef_user already exists — skipping';
+        RAISE NOTICE 'Role mef_user already exists — refreshing password';
     END IF;
 END$$;
+
+ALTER ROLE mef_user WITH PASSWORD :'mef_user_password';
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 2. mefdb database (owned by mef_user)

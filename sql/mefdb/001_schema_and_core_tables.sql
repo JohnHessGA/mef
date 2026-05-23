@@ -6,9 +6,12 @@
 --
 -- Idempotent: safe to re-run. Uses CREATE ... IF NOT EXISTS throughout.
 --
--- Manual run:
---     PGPASSWORD=mef_local_2026 psql -h localhost -U mef_user -d mefdb \
---         -v ON_ERROR_STOP=1 -f sql/mefdb/001_schema_and_core_tables.sql
+-- Manual run (password sourced from gitignored config/postgres.secrets.yaml;
+-- see ~/repos/notes/secrets-conventions.md):
+--     PGPASSWORD="$(grep -A1 '^mefdb:' config/postgres.secrets.yaml \
+--                   | grep password | awk '{print $2}' | tr -d \"'\\\"\")" \
+--         psql -h localhost -U mef_user -d mefdb \
+--              -v ON_ERROR_STOP=1 -f sql/mefdb/001_schema_and_core_tables.sql
 --
 -- Or via the CLI:
 --     mef init-db
