@@ -2,7 +2,7 @@
 
 Working instructions for code assistants in the MEF repo.
 
-For MEF's place in AFT (alongside MDC, UDC, RSE, DAS, IRA Guard, Overwatch), see `~/repos/CLAUDE.md` and `~/repos/notes/` — those are the system-wide references.
+For MEF's place in AFT (alongside MDC, UDC, RSE, DAS, IRA Guard, Overwatch), see `~/repos/CLAUDE.md` and `~/repos/aft-platform/docs/` — those are the system-wide references.
 
 ## What MEF is (and isn't)
 
@@ -75,12 +75,12 @@ These are load-bearing. Stop and ask before crossing any of them.
   - `mefdb` — MEF's own database (schema `mef`, owner `mef_user`) — created and in active use
   - `shdb` — primary data source (read-only, same PG instance)
   - `overwatch` — telemetry (fail-silent writes)
-- **Secrets:** `config/postgres.secrets.yaml` (gitignored) with `mefdb`, `shdb`, `overwatch` sections. No env-var fallback for passwords. See the "Secrets — no literal passwords in tracked files" section below and `~/repos/notes/secrets-conventions.md`.
+- **Secrets:** `config/postgres.secrets.yaml` (gitignored) with `mefdb`, `shdb`, `overwatch` sections. No env-var fallback for passwords. See the "Secrets — no literal passwords in tracked files" section below and `~/repos/aft-platform/docs/conventions/secrets-conventions.md`.
 - **Application config:** `config/mef.yaml` (gitignored).
 
 ## Secrets — no literal passwords in tracked files
 
-Credentials live in `config/postgres.secrets.yaml` (gitignored). See `~/repos/notes/secrets-conventions.md` for the full policy and replacement patterns A–E.
+Credentials live in `config/postgres.secrets.yaml` (gitignored). See `~/repos/aft-platform/docs/conventions/secrets-conventions.md` for the full policy and replacement patterns A–E.
 
 **Hard rule:** never type a literal password into any tracked file. Not Python, not shell scripts, not SQL bootstrap DDL, not SQL comments, not markdown code blocks. The 2026-05-23 cross-repo audit cleared every existing literal across the eleven AFT repos using the conventions doc patterns; don't reintroduce them. If you find yourself typing one, stop and use the relevant pattern (Python via `load_postgres_config()`; shell/SQL-comment/markdown via the `grep -A1 ... config/postgres.secrets.yaml` extraction; bootstrap DDL via psql `:'role_password'` substitution + `ALTER ROLE`).
 - **Data root:** `/mnt/aftdata/` (native ext4 VHDX). MEF generated artifacts (if any) live under `/mnt/aftdata/mef/`.
@@ -198,6 +198,6 @@ MEF has no predecessor inside AFT. It borrows patterns from IRA Guard (CSV inges
 | Pre-rewrite design spec (historical) | `docs/bu20260520/mef_design_spec.md` |
 | Pre-rewrite layered gating (historical) | `docs/bu20260520/mef_layered_gating.md` |
 | New doc set (in-progress, 2026-05-20→) | `docs/` (excluding `bu20260520/`) |
-| System-wide conventions | `~/repos/notes/conventions.md` |
-| Database catalog | `~/repos/notes/databases.md` |
+| System-wide conventions | `~/repos/aft-platform/docs/conventions/conventions.md` |
+| Database catalog | `~/repos/aft-platform/docs/platform/databases.md` |
 | AFT architecture overview | `~/repos/CLAUDE.md` |

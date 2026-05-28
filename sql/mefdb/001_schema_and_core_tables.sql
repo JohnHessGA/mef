@@ -7,7 +7,7 @@
 -- Idempotent: safe to re-run. Uses CREATE ... IF NOT EXISTS throughout.
 --
 -- Manual run (password sourced from gitignored config/postgres.secrets.yaml;
--- see ~/repos/notes/secrets-conventions.md):
+-- see ~/repos/aft-platform/docs/conventions/secrets-conventions.md):
 --     PGPASSWORD="$(grep -A1 '^mefdb:' config/postgres.secrets.yaml \
 --                   | grep password | awk '{print $2}' | tr -d \"'\\\"\")" \
 --         psql -h localhost -U mef_user -d mefdb \

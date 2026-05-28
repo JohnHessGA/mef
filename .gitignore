@@ -17,7 +17,7 @@ build/
 *.log
 
 # Secrets / local config (do not commit)
-# AFT convention: filename includes "secrets". See ~/repos/notes/secrets-conventions.md
+# AFT convention: filename includes "secrets". See ~/repos/aft-platform/docs/conventions/secrets-conventions.md
 *.secrets.yaml
 config/mef.yaml
 .env

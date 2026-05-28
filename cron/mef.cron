@@ -1,5 +1,5 @@
 # MEF — Muse Engine Forecaster cron entries.
-# See ~/repos/notes/cron-conventions.md.
+# See ~/repos/aft-platform/docs/conventions/cron-conventions.md.
 
 CRON_TZ=America/New_York
 

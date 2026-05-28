@@ -66,7 +66,7 @@ CCW sequencing plan: CCW scaffolding (milestones 0-6) proceeds in parallel with 
 4. Migration: `ALTER TABLE mart.stock_equity_daily ADD COLUMN IF NOT EXISTS ...` (idempotent per UDC convention).
 5. Full mart rebuild (`udc harvest --rebuild-mart`) to populate historical rows.
 6. Update `~/repos/udc/docs/mart-layer-guide.md` column table to document the four additions.
-7. Announce in `~/repos/notes/conventions.md` or appropriate notes file.
+7. Announce in `~/repos/aft-platform/docs/conventions/conventions.md` or appropriate notes file.
 
 Expected incremental harvest cost: small. LATERAL forward-lookups are cheap since `earnings_calendar` and `stock_dividend_events_1d` are indexed on `(symbol, event_date)`.
 

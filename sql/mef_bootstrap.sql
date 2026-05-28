@@ -3,7 +3,7 @@
 -- reach all three databases.
 --
 -- Run once as postgres superuser, passing the mef_user password from the
--- gitignored secrets file (see ~/repos/notes/secrets-conventions.md):
+-- gitignored secrets file (see ~/repos/aft-platform/docs/conventions/secrets-conventions.md):
 --
 --     sudo -u postgres psql \
 --       -v mef_user_password="$(grep -A1 '^mefdb:' config/postgres.secrets.yaml \

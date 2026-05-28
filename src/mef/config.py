@@ -6,7 +6,7 @@ Loads two YAML files from the `config/` directory at the repo root:
 - `config/mef.yaml`              — application settings (cadence, ranker, llm, email, ...).
 
 Credentials live exclusively in the YAML file. No env-var fallback for
-passwords — see `~/repos/notes/secrets-conventions.md`. ``MEF_LOG_LEVEL``
+passwords — see `~/repos/aft-platform/docs/conventions/secrets-conventions.md`. ``MEF_LOG_LEVEL``
 and ``MEF_CLAUDE_PATH`` remain as runtime overrides for non-credential
 values.
 """

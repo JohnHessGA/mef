@@ -393,7 +393,7 @@ New PostgreSQL database on the shared `localhost:5432` instance, following AFT c
 
 - **Database:** `mefdb`
 - **Schema:** `mef`
-- **Owner:** `mef_user` (credentials stored in `config/postgres.secrets.yaml`, gitignored, following AFT secrets convention — see `~/repos/notes/secrets-conventions.md`)
+- **Owner:** `mef_user` (credentials stored in `config/postgres.secrets.yaml`, gitignored, following AFT secrets convention — see `~/repos/aft-platform/docs/conventions/secrets-conventions.md`)
 
 Tables (full column-level schema in `docs/mef_design_spec.md` §"MEFDB Schema"; audit-table relationships in `mef_audit_model.md`):
 
@@ -454,6 +454,6 @@ It does **not** inherit from the retired XPM tool. References should be to RSE g
 | LLM gate details | `docs/mef_llm_gate.md` |
 | Build order / status notes | `docs/mef_build_order.md` |
 | **Out-of-scope decisions** | `docs/mef_out_of_scope.md` |
-| System-wide conventions | `~/repos/notes/conventions.md` |
-| Database catalog | `~/repos/notes/databases.md` |
-| Peer applications | `~/repos/notes/iraguard.md`, `~/repos/notes/rse.md` |
+| System-wide conventions | `~/repos/aft-platform/docs/conventions/conventions.md` |
+| Database catalog | `~/repos/aft-platform/docs/platform/databases.md` |
+| Peer applications | `~/repos/aft-platform/docs/tools/iraguard.md`, `~/repos/aft-platform/docs/tools/rse.md` |

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # MEF cron entry point. Pure plumbing.
-# See ~/repos/notes/cron-conventions.md.
+# See ~/repos/aft-platform/docs/conventions/cron-conventions.md.
 set -euo pipefail
 mkdir -p /mnt/aftdata/logs/mef
 cd /home/johnh/repos/mef
