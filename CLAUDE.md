@@ -68,9 +68,9 @@ These are load-bearing. Stop and ask before crossing any of them.
 
 ## Environment
 
-- **Python:** 3.12, src layout, editable install via `pyproject.toml` (`pip install -e .`). Runtime deps: `psycopg2-binary`, `pyyaml`, `yfinance` (used by `mef.price_check` for post-emission live quotes), and **`aft_core`** (editable from `~/repos/aft-platform`, source of MEF's canonical Track 4 identity; see `docs/aft_core_integration.md`). `aft_core` is intentionally not in `pyproject.toml` because it ships editable-only.
+- **Python:** 3.14, src layout, editable install via `pyproject.toml` (`pip install -e .`). Runtime deps: `psycopg2-binary`, `pyyaml`, `yfinance` (used by `mef.price_check` for post-emission live quotes), and **`aft_core`** (editable from `~/repos/aft-platform`, source of MEF's canonical Track 4 identity; see `docs/aft_core_integration.md`). `aft_core` is intentionally not in `pyproject.toml` because it ships editable-only.
 - **Virtual env:** `~/repos/mef/.venv/` (created with `python3 -m venv .venv`)
-- **Host:** WSL2 Ubuntu 24.04 (`codex`) on Windows 11 (`hal64`)
+- **Host:** WSL2 Ubuntu 26.04 LTS (`codex`) on Windows 11 (`hal64`)
 - **Databases:** PostgreSQL 18.3 + TimescaleDB 2.26.4 on `localhost:5432` (upgraded from PG 16 on 2026-05-07; PG 16 retained as stopped rollback copy on :5499)
   - `mefdb` — MEF's own database (schema `mef`, owner `mef_user`) — created and in active use
   - `shdb` — primary data source (read-only, same PG instance)
