@@ -213,6 +213,49 @@ def _rows_to_dict(cur, asset_kind: str) -> dict[str, dict[str, Any]]:
     return out
 
 
+# Ticker-reuse guard. A reused ticker (a delisted issuer's symbol later adopted
+# by a different company) splices two issuers under one symbol in the mart, so a
+# trailing return whose window reaches before the boundary compares two
+# companies. shdb.security_ticker_boundary (the platform SSOT mirror) records the
+# date the current entity's series begins; we null any return_Nd whose N-trading-
+# day lookback would cross it. Only 2 universe names carry a boundary today
+# (COR, FISV) and only their longest windows are affected, but the guard is
+# general. See ~/repos/aft-platform/docs/platform/security-identity-and-ticker-reuse.md.
+_BOUNDARY_SQL = """
+SELECT symbol, MAX(boundary_date) AS boundary_date
+  FROM shdb.security_ticker_boundary
+ WHERE symbol = ANY(%s)
+ GROUP BY symbol
+"""
+
+_RETURN_WINDOWS = (5, 20, 63, 126, 252)          # trading days; mirrors return_*d cols
+_TRADING_DAYS_PER_CAL_DAY = 252 / 365.0
+
+
+def _fetch_boundaries(cur, symbols: list[str]) -> dict[str, Any]:
+    """Map symbol -> current-entity start (max boundary_date). Empty + fail-open
+    if the boundary view is absent (older SHDB) — never blocks a run."""
+    try:
+        cur.execute(_BOUNDARY_SQL, (symbols,))
+        return {sym: bnd for sym, bnd in cur.fetchall()}
+    except Exception:
+        return {}
+
+
+def _apply_boundary_guard(rows: dict[str, dict[str, Any]], boundaries: dict[str, Any]) -> None:
+    """Null any return_Nd whose N-trading-day lookback reaches before the symbol's
+    ticker-reuse boundary (the window would splice two issuers). The ranker already
+    treats None as 'signal unavailable'."""
+    for sym, bnd in boundaries.items():
+        row = rows.get(sym)
+        if row is None or bnd is None or row.get("bar_date") is None:
+            continue
+        avail_trading_days = int((row["bar_date"] - bnd).days * _TRADING_DAYS_PER_CAL_DAY)
+        for n in _RETURN_WINDOWS:
+            if n > avail_trading_days:
+                row[f"return_{n}d"] = None
+
+
 _UPCOMING_EARNINGS_SQL = """
 SELECT symbol, MIN(announcement_date) AS next_earnings_date
   FROM shdb.earnings_calendar_upcoming
@@ -273,8 +316,14 @@ def pull_latest_evidence() -> EvidenceBundle:
             stocks = _rows_to_dict(cur, "stock")
             cur.execute(_ETF_SQL, (etf_symbols,))
             etfs = _rows_to_dict(cur, "etf")
+            boundaries = _fetch_boundaries(cur, stock_symbols + etf_symbols)
     finally:
         conn.close()
+
+    # Null any trailing return whose window crosses a ticker-reuse boundary,
+    # before the baseline / ranker consume the feature rows.
+    _apply_boundary_guard(stocks, boundaries)
+    _apply_boundary_guard(etfs, boundaries)
 
     symbols = {**stocks, **etfs}
 
